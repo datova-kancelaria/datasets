@@ -1,0 +1,47 @@
+name: Fetch MetaIS reports
+
+on:
+  schedule:
+# cron:
+# minute (0-59)
+# hour (0-23)
+# day of the month (1-31)
+# month (1-12)
+# day of the week (0-7 here both 0 and 7 mean Sunday)
+# "0 2 * * 0" means 2am (0 min), I don't care what day it falls on, any month, Sundays
+    - cron: "0 2 * * 0"
+  workflow_dispatch: {}
+
+jobs:
+  fetch-convert-deploy:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      pages: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4 # this automatically injects an env var GITHUB_TOKEN=...
+
+      - name: Fetch JSON reports
+        run: ./fetch-reports.sh
+
+      - name: Convert JSON to CSV
+        run: python3 convert.py
+
+      - name: Output contents of the directory
+        run: ./check.sh
+
+      - name: Setup pages
+        uses: actions/configure-pages@v5
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./data
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
