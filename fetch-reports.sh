@@ -6,12 +6,12 @@ NAMES=(KS AS ISVS Projekt InfraSluzba KRIS)
 BASE_URL="https://metais.slovensko.sk/api/report/reports/execute"
 LANG="sk"
 
-mkdir -p data
+mkdir -p data/egov
 
 for i in "${!IDS[@]}"; do
   id="${IDS[$i]}"
   filename="${NAMES[$i]}"
-  out="data/${filename}.json"
+  out="data/egov/${filename}.json"
   curl --location "${BASE_URL}/${id}/type/typ?lang=${LANG}" \
   --header 'Content-Type: application/json' \
   --data '{

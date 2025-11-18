@@ -1,6 +1,6 @@
 import json, csv, os, sys
 
-data_dir = "data"
+data_dir = "data/egov"
 
 for filename in os.listdir(data_dir):
     if not filename.endswith(".json"):
