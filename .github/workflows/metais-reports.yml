@@ -35,7 +35,7 @@ jobs:
       - name: Install Python deps
         run: |
           python -m pip install --upgrade pip
-          python -m pip install requests pandas tqdm
+          python -m pip install requests pandas tqdm openpyxl
 
       - name: Fetch JSON reports
         run: ./fetch-reports.sh
@@ -45,6 +45,11 @@ jobs:
 
       - name: Fetch NUTS datasets
         run: python3 fetch-nuts.py
+
+      - name: Fetch Cloud services
+        env:
+          API_URI: ${{ secrets.API_URI }}
+        run: python3 cloud_services.py
 
       - name: Output contents of the directory
         run: ./check.sh
