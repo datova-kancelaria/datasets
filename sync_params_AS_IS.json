@@ -1,0 +1,92 @@
+[
+    {
+        "AS": "Gen_Profil_nazov",
+        "InfraSluzba": "Gen_Profil_nazov",
+        "merged": "Gen_Profil_nazov",
+        "name": "Názov služby"
+    },
+    {
+        "AS": "Gen_Profil_anglicky_nazov",
+        "InfraSluzba": "Gen_Profil_anglicky_nazov",
+        "merged": "Gen_Profil_anglicky_nazov",
+        "name": "Anglický názov"
+    },
+    {
+        "AS": "Gen_Profil_popis",
+        "InfraSluzba": "Gen_Profil_popis",
+        "merged": "Gen_Profil_popis",
+        "name": "Popis"
+    },
+    {
+        "AS": "Gen_Profil_anglicky_popis",
+        "InfraSluzba": "Gen_Profil_anglicky_popis",
+        "merged": "Gen_Profil_anglicky_popis",
+        "name": "Anglický popis"
+    },
+    {
+        "AS": "Gen_Profil_poznamka",
+        "InfraSluzba": "Gen_Profil_poznamka",
+        "merged": "Gen_Profil_poznamka",
+        "name": "Poznámka"
+    },
+    {
+        "AS": "Gen_Profil_zdroj",
+        "InfraSluzba": "Gen_Profil_zdroj",
+        "merged": "Gen_Profil_zdroj",
+        "name": "Zdroj"
+    },
+    {
+        "AS": "Gen_Profil_kod_metais",
+        "InfraSluzba": "Gen_Profil_kod_metais",
+        "merged": "Gen_Profil_kod_metais",
+        "name": "Kód MetaIS"
+    },
+    {
+        "AS": "Gen_Profil_ref_id",
+        "InfraSluzba": "Gen_Profil_ref_id",
+        "merged": "Gen_Profil_ref_id",
+        "name": "Referencovateľný identifikátor"
+    },
+    {
+        "AS": "EA_Profil_AS_typ_cloudovej_sluzby",
+        "InfraSluzba": "EA_Profil_InfraSluzba_typ_cloudovej_sluzby",
+        "merged": "EA_Profil_typ_cloudovej_sluzby",
+        "name": "Typ cloudovej služby"
+    },
+    {
+        "AS": "Gen_Profil_EA_skrateny_nazov",
+        "InfraSluzba": "Gen_Profil_EA_skrateny_nazov",
+        "merged": "Gen_Profil_EA_skrateny_nazov",
+        "name": "Skratený názov"
+    },
+    {
+        "AS": "Gen_Profil_EA_popis_referencie",
+        "InfraSluzba": "Gen_Profil_EA_popis_referencie",
+        "merged": "Gen_Profil_EA_popis_referencie",
+        "name": "Popis referencie"
+    },
+    {
+        "AS": "Gen_Profil_EA_zoznam_referencii",
+        "InfraSluzba": "Gen_Profil_EA_zoznam_referencii",
+        "merged": "Gen_Profil_EA_zoznam_referencii",
+        "name": "Zoznam referencií"
+    },
+    {
+        "AS": "Gen_Profil_EA_odkaz_na_referenciu",
+        "InfraSluzba": "Gen_Profil_EA_odkaz_na_referenciu",
+        "merged": "Gen_Profil_EA_odkaz_na_referenciu",
+        "name": "Odkaz na referenciu"
+    },
+    {
+        "AS": "Gen_Profil_EA_typ_replikacie",
+        "InfraSluzba": "Gen_Profil_EA_typ_replikacie",
+        "merged": "Gen_Profil_EA_typ_replikacie",
+        "name": "Typ replikácie"
+    },
+    {
+        "AS": "Gen_Profil_EA_pocet_replikacii",
+        "InfraSluzba": "Gen_Profil_EA_pocet_replikacii",
+        "merged": "Gen_Profil_EA_pocet_replikacii",
+        "name": "Počet replikácií"
+    }
+]
