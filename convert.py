@@ -2,6 +2,12 @@ import json, csv, os, sys
 
 data_dir = "data/egov"
 
+def standardize_data(data):
+    res = data["result"]
+    header = [h["name"] for h in res.get("headers", [])]
+    rows = [r.get("values", []) for r in res.get("rows", [])]
+    return {"header": header, "rows": rows}
+
 for filename in os.listdir(data_dir):
     if not filename.endswith(".json"):
         continue
@@ -21,3 +27,8 @@ for filename in os.listdir(data_dir):
         for r in rows:
             # Replace None with empty string
             writer.writerow(["" if v is None else v for v in r])
+
+    # overwrite json with leaner format
+    data_standardized = standardize_data(data)
+    with open(infile, "w", encoding="utf-8") as f:
+        f.write(json.dumps(data_standardized, ensure_ascii=False, indent=2))
