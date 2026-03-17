@@ -134,7 +134,7 @@ name_to_abb = {
     "Žilinský": "ZSK"
 }
 
-dest_root = "data/egov/"
+dest_root = "data/location/"
 Path(dest_root).mkdir(parents=True, exist_ok=True)
 
 print("Obtaining URIs...")
