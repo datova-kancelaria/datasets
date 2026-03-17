@@ -68,14 +68,8 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Run finance harvest on VM
-        env:
-          http_proxy: http://<REDACTED_PROXY_IP>:3128
-          https_proxy: http://<REDACTED_PROXY_IP>:3128
-          HTTP_PROXY: http://<REDACTED_PROXY_IP>:3128
-          HTTPS_PROXY: http://<REDACTED_PROXY_IP>:3128
-        run: |
-          /home/ubuntu/scripts/run-finance-build.sh "$PWD/data/finance"
+      - name: Build finance data on VM
+        run: /home/ubuntu/scripts/run-finance-build.sh "$PWD/data/finance"
 
       - name: Upload finance artifact
         uses: actions/upload-artifact@v4
