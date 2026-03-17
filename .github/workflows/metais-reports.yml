@@ -101,6 +101,15 @@ jobs:
           name: finance-data
           path: ./data/finance
 
+      - name: Download location artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: location-data
+          path: ./data/location
+
+      - name: Generate directory index pages
+        run: python3 .github/scripts/make_index.py ./data
+
       - name: Setup pages
         uses: actions/configure-pages@v5
 
