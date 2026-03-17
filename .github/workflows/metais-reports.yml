@@ -11,30 +11,20 @@ on:
 # "0 2 * * 0" means 2am (0 min), I don't care what day it falls on, any month, Sundays
     - cron: "0 2 * * 0"
   workflow_dispatch: {}
-  push:
-    branches:
-      - main
-    paths:
-      - 'data/finance/**'
 
 concurrency:
   group: datasets-pages
   cancel-in-progress: false
 
 jobs:
-  fetch-convert-deploy:
+  build-egov:
     runs-on: ubuntu-24.04
     permissions:
-      contents: write
-      id-token: write
-      pages: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      contents: read
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4 # this automatically injects an env var GITHUB_TOKEN=...
+        uses: actions/checkout@v4
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -63,11 +53,65 @@ jobs:
       - name: Output contents of the directory
         run: ./check.sh
 
+      - name: Upload egov artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: egov-data
+          path: ./data/egov
+
+  build-finance:
+    runs-on: [self-hosted, linux, x64, finance-vm]
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run finance harvest on VM
+        env:
+          http_proxy: http://<REDACTED_PROXY_IP>:3128
+          https_proxy: http://<REDACTED_PROXY_IP>:3128
+          HTTP_PROXY: http://<REDACTED_PROXY_IP>:3128
+          HTTPS_PROXY: http://<REDACTED_PROXY_IP>:3128
+        run: |
+          /home/ubuntu/scripts/run-finance-build.sh "$PWD/data/finance"
+
+      - name: Upload finance artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: finance-data
+          path: ./data/finance
+
+  deploy:
+    needs: [build-egov, build-finance]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Download egov artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: egov-data
+          path: ./data/egov
+
+      - name: Download finance artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: finance-data
+          path: ./data/finance
+
       - name: Setup pages
         uses: actions/configure-pages@v5
 
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
         with:
           path: ./data
 
