@@ -59,6 +59,12 @@ jobs:
           name: egov-data
           path: ./data/egov
 
+      - name: Upload location artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: location-data
+          path: ./data/location
+
   build-finance:
     runs-on: [self-hosted, linux, x64, finance-vm]
     permissions:
