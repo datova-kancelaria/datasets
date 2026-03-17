@@ -11,6 +11,15 @@ on:
 # "0 2 * * 0" means 2am (0 min), I don't care what day it falls on, any month, Sundays
     - cron: "0 2 * * 0"
   workflow_dispatch: {}
+  push:
+    branches:
+      - main
+    paths:
+      - 'data/finance/**'
+
+concurrency:
+  group: datasets-pages
+  cancel-in-progress: false
 
 jobs:
   fetch-convert-deploy:
@@ -56,10 +65,12 @@ jobs:
 
       - name: Setup pages
         uses: actions/configure-pages@v5
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: ./data
+
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
