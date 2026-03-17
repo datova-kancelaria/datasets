@@ -3,4 +3,6 @@ __pycache__/
 *.pyc
 
 #local
-data/
+data/*
+!data/finance
+!data/finance/**
