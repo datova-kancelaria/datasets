@@ -95,6 +95,9 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
       - name: Download egov artifact
         uses: actions/download-artifact@v5
         with:
