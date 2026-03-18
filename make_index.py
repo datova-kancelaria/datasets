@@ -9,17 +9,11 @@ from urllib.parse import quote
 
 TITLE = "datasets"
 
-
 def href_for(path: Path) -> str:
     return "/".join(quote(part) for part in path.parts)
 
 
-def rel_href(from_dir: Path, to_path: Path) -> str:
-    rel = to_path.relative_to(from_dir)
-    return href_for(rel)
-
-
-def write_index(dir_path: Path, root: Path) -> None:
+def write_index(dir_path: Path, root: Path, cssstyle: str, header: str) -> None:
     entries = sorted(
         [p for p in dir_path.iterdir() if p.name != "index.html"],
         key=lambda p: (p.is_file(), p.name.lower()),
@@ -27,6 +21,9 @@ def write_index(dir_path: Path, root: Path) -> None:
 
     rel_dir = dir_path.relative_to(root)
     pretty_dir = "/" if rel_dir == Path(".") else f"/{rel_dir.as_posix()}/"
+
+    style_split = ["    " + s for s in cssstyle.splitlines()]
+    header_split = ["  " + s for s in header.splitlines()]
 
     lines: list[str] = [
         "<!doctype html>",
@@ -36,22 +33,19 @@ def write_index(dir_path: Path, root: Path) -> None:
         "  <meta name='viewport' content='width=device-width, initial-scale=1'>",
         f"  <title>{escape(TITLE)} – {escape(pretty_dir)}</title>",
         "  <style>",
-        "    body { font-family: sans-serif; max-width: 900px; margin: 40px auto; padding: 0 16px; line-height: 1.5; }",
-        "    h1 { margin-bottom: 0.2em; }",
-        "    .path { color: #666; margin-bottom: 1.5em; }",
-        "    ul { list-style: none; padding-left: 0; }",
-        "    li { margin: 0.35em 0; }",
-        "    a { text-decoration: none; }",
-        "    a:hover { text-decoration: underline; }",
-        "    .dir a::before { content: '📁 '; }",
-        "    .file a::before { content: '📄 '; }",
-        "    .meta { color: #666; font-size: 0.92em; margin-left: 0.4em; }",
+    ]
+    lines += style_split
+    lines += [
         "  </style>",
         "</head>",
         "<body>",
-        f"  <h1>{escape(TITLE)}</h1>",
-        f"  <div class='path'>{escape(pretty_dir)}</div>",
-        "  <ul>",
+    ]
+    lines += header_split
+    lines += [
+        "  <main class='content'>",
+        f"    <h1>{escape(TITLE)}</h1>",
+        f"    <div class='path'>{escape(pretty_dir)}</div>",
+        "    <ul>",
     ]
 
     if dir_path != root:
@@ -72,7 +66,8 @@ def write_index(dir_path: Path, root: Path) -> None:
             )
 
     lines += [
-        "  </ul>",
+        "    </ul>",
+        "  </main>",
         "</body>",
         "</html>",
     ]
@@ -85,6 +80,10 @@ def main() -> int:
         print("Usage: make_index.py <root_dir>", file=sys.stderr)
         return 2
 
+    script_dir = Path(__file__).resolve().parent
+    cssstyle = (script_dir / "style.css").read_text(encoding="utf-8")
+    header = (script_dir / "header.html").read_text(encoding="utf-8")
+
     root = Path(sys.argv[1]).resolve()
     if not root.is_dir():
         print(f"Not a directory: {root}", file=sys.stderr)
@@ -92,7 +91,7 @@ def main() -> int:
 
     dirs = [root] + sorted((p for p in root.rglob("*") if p.is_dir()), key=lambda p: str(p))
     for d in dirs:
-        write_index(d, root)
+        write_index(d, root, cssstyle, header)
 
     print(f"Generated index.html in {len(dirs)} directories under {root}")
     return 0
