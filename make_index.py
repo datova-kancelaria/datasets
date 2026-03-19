@@ -48,6 +48,8 @@ def visible_children(dir_path: Path, ignore_patterns: list[str]) -> list[Path]:
         if p.name not in SKIP_NAMES and not is_ignored(p, ignore_patterns)
     ]
 
+def display_name_for_file(path: Path) -> str:
+    return path.stem if path.suffix else path.name
 
 def entry_sort_key(path: Path) -> tuple[int, str]:
     # folders first, then alphabetical
@@ -214,11 +216,13 @@ def write_index(
             "          <tr data-parent='1'>",
             "            <td class='col-name'>",
             "              <div class='name-cell'>",
-            f"                <img class='entry-icon' src='{escape(dir_icon_href)}' alt=''>",
+            "                <a class='icon-link' href='../index.html' aria-label='Go up'>",
+            f"                  <img class='entry-icon' src='{escape(dir_icon_href)}' alt=''>",
+            "                </a>",
             "                <a class='name-link' href='../index.html'>..</a>",
             "              </div>",
             "            </td>",
-            "            <td class='col-ext'>dir</td>",
+            "            <td class='col-ext'></td>",
             "            <td class='col-size'>—</td>",
             "            <td class='col-mtime'>—</td>",
             "          </tr>",
@@ -243,7 +247,7 @@ def write_index(
             display_size = human_size(size_bytes)
             mtime_ts = int(entry.stat().st_mtime)
             display_mtime = format_mtime(mtime_ts, now)
-            display_name = entry.name
+            display_name = display_name_for_file(entry)
 
         lines += [
             "          <tr"
@@ -256,7 +260,9 @@ def write_index(
             ">",
             "            <td class='col-name'>",
             "              <div class='name-cell'>",
-            f"                <img class='entry-icon' src='{escape(icon_href)}' alt=''>",
+            f"                <a class='icon-link' href='{escape(href)}' aria-label='Open {escape(display_name)}'>",
+            f"                  <img class='entry-icon' src='{escape(icon_href)}' alt=''>",
+            "                </a>",
             f"                <a class='name-link' href='{escape(href)}'>{escape(display_name)}</a>",
             "              </div>",
             "            </td>",

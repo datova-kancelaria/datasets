@@ -123,6 +123,20 @@ h1 { margin-bottom: 0.2em; }
   text-decoration: underline;
 }
 
+.icon-link {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  line-height: 0;
+  text-decoration: none;
+  transition: filter 0.15s ease, transform 0.15s ease;
+}
+
+.name-cell:hover .icon-link {
+  filter: brightness(1.1) drop-shadow(0 0 2px rgba(0, 102, 204, 0.25));
+  transform: scale(1.05);
+}
+
 .col-ext,
 .col-size,
 .col-mtime {
