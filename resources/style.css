@@ -119,10 +119,6 @@ h1 { margin-bottom: 0.2em; }
   color: #06c;
 }
 
-.name-link:hover {
-  text-decoration: underline;
-}
-
 .icon-link {
   display: flex;
   align-items: center;
@@ -135,6 +131,12 @@ h1 { margin-bottom: 0.2em; }
 .name-cell:hover .icon-link {
   filter: brightness(1.1) drop-shadow(0 0 2px rgba(0, 102, 204, 0.25));
   transform: scale(1.05);
+}
+
+.name-cell:hover .name-link {
+  text-decoration: underline;
+  color: #06c;
+  font-weight: 600;
 }
 
 .col-ext,
