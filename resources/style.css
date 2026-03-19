@@ -1,0 +1,145 @@
+body {
+  margin: 0;
+  font-family: sans-serif;
+  line-height: 1.5;
+}
+
+.site-header { width: 100%; }
+
+.topbar {
+  height: 3px;
+  width: 100%;
+  background-image: linear-gradient(
+    90deg,
+    #fff 0, #fff 33.3%,
+    #003183 0, #003183 66.6%,
+    #d0190f 0, #d0190f
+  );
+  background-size: 150px 100%;
+  background-repeat: repeat;
+}
+
+.logo-row {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 0 0 1em;
+}
+
+.logo-row img {
+  height: 60px;
+  display: block;
+}
+
+.content {
+  box-sizing: border-box;
+  width: min(960px, calc(100% - 32px));
+  margin-top: 40px;
+  margin-bottom: 40px;
+  margin-right: auto;
+  margin-left: clamp(16px, calc((100% - 960px) / 2), 200px);
+  padding: 0 16px;
+}
+
+h1 { margin-bottom: 0.2em; }
+.path { color: #666; margin-bottom: 1.5em; }
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.index-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: auto;
+}
+
+.index-table th,
+.index-table td {
+  padding: 0.35em 0.5em;
+  border-bottom: 1px solid #e5e5e5;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.index-table th {
+  font-weight: 600;
+  color: #444;
+  white-space: nowrap;
+}
+
+.index-table tbody tr:hover {
+  background: #f8f8f8;
+}
+
+.sort-btn {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  cursor: pointer;
+}
+
+.sort-btn:hover {
+  text-decoration: underline;
+}
+
+.sort-indicator {
+  display: inline-block;
+  width: 1em;
+  text-align: center;
+  color: #666;
+}
+
+.name-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  min-width: 0;
+}
+
+.entry-icon {
+  width: 1.5em;
+  height: 1.5em;
+  flex: 0 0 1.5em;
+  display: block;
+}
+
+.name-link {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+
+.name-link:link,
+.name-link:visited {
+  color: #06c;
+}
+
+.name-link:hover {
+  text-decoration: underline;
+}
+
+.col-ext,
+.col-size,
+.col-mtime {
+  white-space: nowrap;
+}
+
+.col-ext {
+  color: #666;
+  width: 7em;
+}
+
+.col-size {
+  text-align: right;
+  width: 8em;
+}
+
+.col-mtime {
+  color: #666;
+  width: 12em;
+}

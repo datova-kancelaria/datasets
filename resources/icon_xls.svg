@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="100mm"
+   height="100mm"
+   viewBox="0 0 100 100"
+   version="1.1"
+   id="svg1"
+   inkscape:version="1.4.3 (0d15f75, 2025-12-25)"
+   sodipodi:docname="icon_xls.svg"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview1"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:document-units="mm"
+     inkscape:zoom="1.4378367"
+     inkscape:cx="222.90431"
+     inkscape:cy="192.30278"
+     inkscape:window-width="1920"
+     inkscape:window-height="1009"
+     inkscape:window-x="1912"
+     inkscape:window-y="-8"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="layer1" />
+  <defs
+     id="defs1" />
+  <g
+     inkscape:label="Layer 1"
+     inkscape:groupmode="layer"
+     id="layer1">
+    <path
+       id="rect2-4-1"
+       style="fill:#207c35;stroke-width:8.30213;stroke-linejoin:round;paint-order:stroke fill markers;fill-opacity:1"
+       d="M 95,54.629085 V 88.516679 C 95,92.108439 92.108439,95 88.516679,95 H 54.629 V 54.628915 Z M 54.629,5 H 88.516679 C 92.108439,5 95,7.891561 95,11.483321 V 45.371 H 54.629 Z M 45.371,54.628915 V 95 H 11.483321 C 7.891561,95 5,92.108439 5,88.516679 V 54.628915 Z M 11.483321,5 H 45.371 V 45.371 H 5 V 11.483321 C 5,7.891561 7.891561,5 11.483321,5 Z"
+       sodipodi:nodetypes="cssccccsscccccssccscccss" />
+  </g>
+</svg>
