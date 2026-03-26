@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import time
 from pathlib import Path
 from typing import Any
 
-import pandas as pd
 import requests
 from tqdm import tqdm
 
@@ -21,6 +21,34 @@ name_to_abb = {
     "Trnavský": "TTSK",
     "Žilinský": "ZSK",
 }
+
+region_order = [
+    "Bratislavský",
+    "Trnavský",
+    "Trenčiansky",
+    "Nitriansky",
+    "Žilinský",
+    "Banskobystrický",
+    "Prešovský",
+    "Košický",
+]
+
+HEADER = [
+    "Identifikátor",
+    "Kraj",
+    "ID kraja",
+    "Okres",
+    "ID Okresu",
+    "Obec",
+    "ID obce",
+    "Časť obce",
+    "Ulica",
+    "Súpisné číslo",
+    "Orientačné číslo celé",
+    "PSČ",
+    "ADRBOD_X",
+    "ADRBOD_Y",
+]
 
 
 def parse_args() -> argparse.Namespace:
@@ -103,129 +131,151 @@ def parse_dataset(uri: str) -> list[str]:
     for g in graph:
         ds = g.get("dcat:dataset")
         if ds is not None:
-            return [o["iri"] for o in ds]
+            return [o["iri"] for o in ds if isinstance(o, dict) and "iri" in o]
     return []
 
 
-def collect_features(uris: list[str]) -> list[dict[str, Any]]:
-    s = requests.Session()
-    features: list[dict[str, Any]] = []
+def feature_to_row(feature: dict[str, Any]) -> list[str]:
+    properties = feature.get("properties") or {}
+    geometry = feature.get("geometry") or {}
+    coords = geometry.get("coordinates") or []
+    x = coords[0] if len(coords) >= 2 else ""
+    y = coords[1] if len(coords) >= 2 else ""
 
-    for uri in tqdm(uris, desc="Fetching datasets", unit="dataset"):
-        r = fetch_json_with_retry(uri, session=s, tries=6, timeout=30.0, backoff=1.7)
-        if r is None:
-            continue
+    return [
+        str(properties.get("identifier", "")),
+        str(properties.get("nuts3_name", "")),
+        str(properties.get("nuts3_id", "")),
+        str(properties.get("lau1_name", "")),
+        str(properties.get("lau1_id", "")),
+        str(properties.get("lau2_name", "")),
+        str(properties.get("lau2_id", "")),
+        str(properties.get("district_name", "")),
+        str(properties.get("streetname", "")),
+        str(properties.get("propertyregistrationnumber", "")),
+        str(properties.get("orientationnumber", "")),
+        str(properties.get("postalcode", "")),
+        str(x),
+        str(y),
+    ]
 
-        current = r.get("features", [])
-        if current:
-            for feature in current:
-                if isinstance(feature, dict):
-                    features.append(feature)
-        else:
-            print(f"Warning: features in {uri} is empty/does not exist!")
 
-    return features
+def open_region_writers(out_dir: Path):
+    files: dict[str, Any] = {}
+    writers: dict[str, csv.writer] = {}
+
+    for kraj, abb in name_to_abb.items():
+        path = out_dir / f"{abb}.csv"
+        f = path.open("w", newline="", encoding="utf-8")
+        w = csv.writer(f)
+        w.writerow(HEADER)
+        files[kraj] = f
+        writers[kraj] = w
+
+    unknown_path = out_dir / "_UNKNOWN.csv"
+    unknown_file = unknown_path.open("w", newline="", encoding="utf-8")
+    unknown_writer = csv.writer(unknown_file)
+    unknown_writer.writerow(HEADER)
+
+    return files, writers, unknown_file, unknown_writer, unknown_path
 
 
-def create_table(features: list[dict[str, Any]]) -> dict[str, list[str]]:
-    ids: list[str] = []
-    nuts3_names: list[str] = []
-    nuts3_ids: list[str] = []
-    lau1_names: list[str] = []
-    lau1_ids: list[str] = []
-    lau2_names: list[str] = []
-    lau2_ids: list[str] = []
-    district_names: list[str] = []
-    streetnames: list[str] = []
-    propertyregistrationnumbers: list[str] = []
-    orientationnumbers: list[str] = []
-    postalcodes: list[str] = []
-    coord_x: list[str] = []
-    coord_y: list[str] = []
+def file_has_data_rows(path: Path) -> bool:
+    if not path.exists():
+        return False
+    with path.open("r", newline="", encoding="utf-8") as f:
+        reader = csv.reader(f)
+        next(reader, None)  # header
+        return next(reader, None) is not None
 
-    for feature in features:
-        properties = feature.get("properties") or {}
-        geometry = feature.get("geometry") or {}
-        coords = geometry.get("coordinates") or []
-        x = coords[0] if len(coords) >= 2 else ""
-        y = coords[1] if len(coords) >= 2 else ""
 
-        ids.append(properties.get("identifier", ""))
-        nuts3_names.append(properties.get("nuts3_name", ""))
-        nuts3_ids.append(properties.get("nuts3_id", ""))
-        lau1_names.append(properties.get("lau1_name", ""))
-        lau1_ids.append(properties.get("lau1_id", ""))
-        lau2_names.append(properties.get("lau2_name", ""))
-        lau2_ids.append(properties.get("lau2_id", ""))
-        district_names.append(properties.get("district_name", ""))
-        streetnames.append(properties.get("streetname", ""))
-        propertyregistrationnumbers.append(properties.get("propertyregistrationnumber", ""))
-        orientationnumbers.append(properties.get("orientationnumber", ""))
-        postalcodes.append(properties.get("postalcode", ""))
-        coord_x.append(x)
-        coord_y.append(y)
+def append_csv_without_header(dst_writer: csv.writer, src_path: Path) -> None:
+    if not src_path.exists():
+        return
 
-    return {
-        "Identifikátor": ids,
-        "Kraj": nuts3_names,
-        "ID kraja": nuts3_ids,
-        "Okres": lau1_names,
-        "ID Okresu": lau1_ids,
-        "Obec": lau2_names,
-        "ID obce": lau2_ids,
-        "Časť obce": district_names,
-        "Ulica": streetnames,
-        "Súpisné číslo": propertyregistrationnumbers,
-        "Orientačné číslo celé": orientationnumbers,
-        "PSČ": postalcodes,
-        "ADRBOD_X": coord_x,
-        "ADRBOD_Y": coord_y,
-    }
+    with src_path.open("r", newline="", encoding="utf-8") as fin:
+        reader = csv.reader(fin)
+        next(reader, None)  # skip header
+        for row in reader:
+            dst_writer.writerow(row)
+
+
+def build_kraje_csv(out_dir: Path, unknown_path: Path) -> None:
+    target = out_dir / "kraje.csv"
+    with target.open("w", newline="", encoding="utf-8") as fout:
+        writer = csv.writer(fout)
+        writer.writerow(HEADER)
+
+        for kraj in region_order:
+            abb = name_to_abb[kraj]
+            append_csv_without_header(writer, out_dir / f"{abb}.csv")
+
+        if file_has_data_rows(unknown_path):
+            append_csv_without_header(writer, unknown_path)
 
 
 def main() -> int:
     args = parse_args()
     out_dir = args.out_dir
     refresh_days = effective_refresh_days(args.refresh_days)
-    sentinel = out_dir / "kraje.csv"
 
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if not should_refresh(out_dir, refresh_days):
-        print(f"Skipping NUTS refresh: all expected files exist and are newer than {refresh_days} days")
+        print(
+            f"Skipping NUTS refresh: all expected files exist and are newer than {refresh_days} days"
+        )
         return 0
 
     print("Obtaining URIs...")
     uris = parse_dataset(URI_root)
 
-    print("Fetching features...")
-    features = collect_features(uris)
+    print("Opening region files...")
+    region_files, region_writers, unknown_file, unknown_writer, unknown_path = open_region_writers(out_dir)
+    seen_unknown_kraje: set[str] = set()
 
-    print("Creating table...")
-    table = create_table(features)
-    df = pd.DataFrame(table)
+    try:
+        s = requests.Session()
 
-    print("Sorting by Kraj...")
-    df = df.sort_values("Kraj", kind="stable")
+        for uri in tqdm(uris, desc="Fetching datasets", unit="dataset"):
+            r = fetch_json_with_retry(uri, session=s, tries=6, timeout=30.0, backoff=1.7)
+            if r is None:
+                continue
 
-    print("Saving to kraje...")
-    df.to_csv(out_dir / "kraje.csv", index=False)
+            current = r.get("features", [])
+            if not current:
+                print(f"Warning: features in {uri} is empty/does not exist!")
+                continue
 
-    known = set(name_to_abb.keys())
-    seen = {k for k in df["Kraj"].dropna().unique() if str(k).strip() != ""}
+            for feature in current:
+                if not isinstance(feature, dict):
+                    continue
 
-    missing = sorted(seen - known)
-    if missing:
+                row = feature_to_row(feature)
+                kraj = row[1].strip()
+
+                if kraj in region_writers:
+                    region_writers[kraj].writerow(row)
+                else:
+                    unknown_writer.writerow(row)
+                    if kraj:
+                        seen_unknown_kraje.add(kraj)
+
+            del r
+            del current
+
+    finally:
+        for f in region_files.values():
+            f.close()
+        unknown_file.close()
+
+    if seen_unknown_kraje:
         print("Warning: Kraj values not in name_to_abb:")
-        for kraj in missing:
+        for kraj in sorted(seen_unknown_kraje):
             print(f"  - {kraj}")
 
-    print("Saving to individual...")
-    for kraj, abb in name_to_abb.items():
-        df_k = df[df["Kraj"] == kraj]
-        if df_k.empty:
-            continue
-        df_k.to_csv(out_dir / f"{abb}.csv", index=False)
+    print("Building kraje.csv...")
+    build_kraje_csv(out_dir, unknown_path)
 
     return 0
 
