@@ -149,6 +149,33 @@ def copy_icon_assets(src_resources: Path, dst_resources: Path) -> None:
         shutil.copy2(p, dst_resources / p.name)
 
 
+def directory_mtime_ts(
+    dir_path: Path,
+    cache: dict[Path, int],
+    ignore_patterns: list[str],
+) -> int:
+    if dir_path in cache:
+        return cache[dir_path]
+
+    latest = int(dir_path.stat().st_mtime)
+
+    visible = visible_children(dir_path, ignore_patterns)
+    if not visible:
+        cache[dir_path] = latest
+        return latest
+
+    child_times: list[int] = []
+    for child in visible:
+        if child.is_dir():
+            child_times.append(directory_mtime_ts(child, cache, ignore_patterns))
+        else:
+            child_times.append(int(child.stat().st_mtime))
+
+    latest = max(child_times) if child_times else latest
+    cache[dir_path] = latest
+    return latest
+
+
 def write_index(
     dir_path: Path,
     root: Path,
@@ -157,6 +184,7 @@ def write_index(
     sort_js: str,
     time_js: str,
     dir_size_cache: dict[Path, int],
+    dir_mtime_cache: dict[Path, int],
     ignore_patterns: list[str],
 ) -> None:
     entries = sorted(visible_children(dir_path, ignore_patterns), key=entry_sort_key)
@@ -225,10 +253,10 @@ def write_index(
         if entry.is_dir():
             href = href_for(Path(entry.name) / "index.html")
             icon_href = dir_icon_href
-            ext_text = "" # or "dir"
+            ext_text = ""  # or "dir"
             size_bytes = directory_size_bytes(entry, dir_size_cache, ignore_patterns)
             display_size = human_size(size_bytes)
-            mtime_ts = int(entry.stat().st_mtime)
+            mtime_ts = directory_mtime_ts(entry, dir_mtime_cache, ignore_patterns)
             display_mtime = format_mtime_fallback(mtime_ts)
             display_name = f"{entry.name}/"
         else:
@@ -310,6 +338,7 @@ def main() -> int:
     copy_icon_assets(src_resources, root / RESOURCES_DIRNAME)
 
     dir_size_cache: dict[Path, int] = {}
+    dir_mtime_cache: dict[Path, int] = {}
 
     dirs = [root] + sorted(
         (
@@ -322,7 +351,17 @@ def main() -> int:
     )
 
     for d in dirs:
-        write_index(d, root, cssstyle, header, sort_js, time_js, dir_size_cache, ignore_patterns)
+        write_index(
+            d,
+            root,
+            cssstyle,
+            header,
+            sort_js,
+            time_js,
+            dir_size_cache,
+            dir_mtime_cache,
+            ignore_patterns,
+        )
 
     print(f"Generated index.html in {len(dirs)} directories under {root}")
     return 0
