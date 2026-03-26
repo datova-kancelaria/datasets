@@ -72,14 +72,23 @@ def write_chunk_manifest(
     d_to: str,
     merge_strategy: str,
     chunk_files: list[Path],
+    merged: bool,
+    reason: str,
+    main_output: Path | None = None,
 ) -> None:
     payload = {
         "dataset": dataset,
         "format": fmt,
         "dateFrom": d_from,
         "dateTo": d_to,
-        "merged": False,
-        "reason": f"merge_strategy={merge_strategy}",
+        "merged": merged,
+        "reason": reason,
         "chunks": [p.name for p in chunk_files],
     }
-    atomic_write_text(manifest_path, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+    if main_output is not None:
+        payload["mainOutput"] = main_output.name
+
+    atomic_write_text(
+        manifest_path,
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+    )

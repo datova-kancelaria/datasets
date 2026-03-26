@@ -124,15 +124,31 @@ def run_job(
             d_to=job.d_to.isoformat(),
             merge_strategy=job.merge_strategy,
             chunk_files=chunk_files,
+            merged=False,
+            reason=f"chunks collected so far; merge_strategy={job.merge_strategy}",
         )
 
     if len(chunk_files) == 1:
         atomic_write_bytes(job.out_path, chunk_files[0].read_bytes())
         write_meta(job.meta_path, want)
 
+        write_chunk_manifest(
+            chunk_dir / "manifest.json",
+            dataset=job.dataset,
+            fmt=job.fmt,
+            d_from=job.d_from.isoformat(),
+            d_to=job.d_to.isoformat(),
+            merge_strategy=job.merge_strategy,
+            chunk_files=chunk_files,
+            merged=True,
+            reason="single payload",
+            main_output=job.out_path,
+        )
+
         if job.touch_mtime_to_range_end:
             touch_path_to_date(job.out_path, job.d_to)
             touch_path_to_date(job.meta_path, job.d_to)
+            touch_path_to_date(chunk_dir / "manifest.json", job.d_to)
 
         return RunResult(
             dataset=job.dataset,
@@ -155,6 +171,8 @@ def run_job(
             d_to=job.d_to.isoformat(),
             merge_strategy=job.merge_strategy,
             chunk_files=chunk_files,
+            merged=False,
+            reason=f"merge_strategy={job.merge_strategy}",
         )
         return RunResult(
             dataset=job.dataset,
@@ -177,6 +195,8 @@ def run_job(
             d_to=job.d_to.isoformat(),
             merge_strategy=job.merge_strategy,
             chunk_files=chunk_files,
+            merged=False,
+            reason=f"merge_strategy={job.merge_strategy}",
         )
         write_meta(job.meta_path, want)
 
@@ -208,9 +228,23 @@ def run_job(
     atomic_write_bytes(job.out_path, merged)
     write_meta(job.meta_path, want)
 
+    write_chunk_manifest(
+        chunk_dir / "manifest.json",
+        dataset=job.dataset,
+        fmt=job.fmt,
+        d_from=job.d_from.isoformat(),
+        d_to=job.d_to.isoformat(),
+        merge_strategy=job.merge_strategy,
+        chunk_files=chunk_files,
+        merged=True,
+        reason=f"merged using {job.merge_strategy}",
+        main_output=job.out_path,
+    )
+
     if job.touch_mtime_to_range_end:
         touch_path_to_date(job.out_path, job.d_to)
         touch_path_to_date(job.meta_path, job.d_to)
+        touch_path_to_date(chunk_dir / "manifest.json", job.d_to)
 
     return RunResult(
         dataset=job.dataset,
