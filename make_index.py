@@ -114,16 +114,9 @@ def format_clock(dt: datetime) -> str:
     return dt.strftime("%I:%M%p").lstrip("0").lower()
 
 
-def format_mtime(ts: float, now: datetime) -> str:
-    dt = datetime.fromtimestamp(ts)
-    today = now.date()
-    yesterday = today - timedelta(days=1)
-
-    if dt.date() == today:
-        return f"Today {format_clock(dt)}"
-    if dt.date() == yesterday:
-        return f"Yesterday {format_clock(dt)}"
-    return f"{dt.strftime('%Y-%m-%d')} {format_clock(dt)}"
+def format_mtime_fallback(ts: float) -> str:
+    dt = datetime.utcfromtimestamp(ts)
+    return dt.strftime("%Y-%m-%d %H:%M UTC")
 
 
 def directory_size_bytes(
@@ -162,6 +155,7 @@ def write_index(
     cssstyle: str,
     header: str,
     sort_js: str,
+    time_js: str,
     dir_size_cache: dict[Path, int],
     ignore_patterns: list[str],
 ) -> None:
@@ -175,8 +169,7 @@ def write_index(
     style_split = ["    " + s for s in cssstyle.splitlines()]
     header_split = ["  " + s for s in header.splitlines()]
     script_split = ["    " + s for s in sort_js.splitlines()]
-
-    now = datetime.now()
+    time_script_split = ["    " + s for s in time_js.splitlines()]
 
     lines: list[str] = [
         "<!doctype html>",
@@ -236,7 +229,7 @@ def write_index(
             size_bytes = directory_size_bytes(entry, dir_size_cache, ignore_patterns)
             display_size = human_size(size_bytes)
             mtime_ts = int(entry.stat().st_mtime)
-            display_mtime = format_mtime(mtime_ts, now)
+            display_mtime = format_mtime_fallback(mtime_ts)
             display_name = f"{entry.name}/"
         else:
             href = href_for(Path(entry.name))
@@ -246,7 +239,7 @@ def write_index(
             size_bytes = entry.stat().st_size
             display_size = human_size(size_bytes)
             mtime_ts = int(entry.stat().st_mtime)
-            display_mtime = format_mtime(mtime_ts, now)
+            display_mtime = format_mtime_fallback(mtime_ts)
             display_name = display_name_for_file(entry)
 
         lines += [
@@ -282,6 +275,11 @@ def write_index(
     lines += script_split
     lines += [
         "  </script>",
+        "  <script>",
+    ]
+    lines += time_script_split
+    lines += [
+        "  </script>",
         "</body>",
         "</html>",
     ]
@@ -300,6 +298,8 @@ def main() -> int:
     cssstyle = (src_resources / "style.css").read_text(encoding="utf-8")
     header = (src_resources / "header.html").read_text(encoding="utf-8")
     sort_js = (src_resources / "sort.js").read_text(encoding="utf-8")
+    time_js = (src_resources / "time.js").read_text(encoding="utf-8")
+
     ignore_patterns = load_ignore_patterns(src_resources / "ignore.txt")
 
     root = Path(sys.argv[1]).resolve()
@@ -314,13 +314,15 @@ def main() -> int:
     dirs = [root] + sorted(
         (
             p for p in root.rglob("*")
-            if p.is_dir() and p.name != RESOURCES_DIRNAME
+            if p.is_dir()
+            and p.name != RESOURCES_DIRNAME
+            and not is_ignored(p, ignore_patterns)
         ),
         key=lambda p: str(p),
     )
 
     for d in dirs:
-        write_index(d, root, cssstyle, header, sort_js, dir_size_cache, ignore_patterns)
+        write_index(d, root, cssstyle, header, sort_js, time_js, dir_size_cache, ignore_patterns)
 
     print(f"Generated index.html in {len(dirs)} directories under {root}")
     return 0

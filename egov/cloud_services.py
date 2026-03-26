@@ -1,25 +1,48 @@
 from __future__ import annotations
 
-import os, json
+import argparse
+import json
+import os
+import sys
 from pathlib import Path
 
 from helper import (
-    fetch_paged, fetch_attr_metadata, get_enums_needed, sanitize_node,
-    load_merge_schema, merge_attribute_metadata, remap_entities,
-    write_excel, standardize_data,
+    fetch_paged,
+    fetch_attr_metadata,
+    get_enums_needed,
+    sanitize_node,
+    load_merge_schema,
+    merge_attribute_metadata,
+    remap_entities,
+    write_excel,
+    standardize_data,
 )
 
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--out-dir",
+        type=Path,
+        default=Path(__file__).resolve().parents[1] / "data" / "egov",
+        help="Directory where egov cloud-services outputs will be written",
+    )
+    return parser.parse_args()
+
+
 def main() -> int:
+    args = parse_args()
+
     api_uri = os.getenv("API_URI", "")
     api_report_num = os.getenv("METAIS_REPORT_NUM_PROD", "")
-    egov_dir = Path("data/egov")
+    egov_dir = args.out_dir
     raw_dump_dir = egov_dir / "raw"
     raw_dump_dir.mkdir(parents=True, exist_ok=True)
 
     if not api_uri and not api_report_num:
         print('One of the env variables "API_URI"/"METAIS_REPORT_NUM_PROD" must be set!', file=sys.stderr)
         return 2
-    elif api_report_num:
+    if api_report_num:
         api_uri = "https://metais.slovensko.sk/api/report/reports/execute/" + api_report_num + "/type/typ?lang=sk"
 
     schema_path = Path(__file__).with_name("sync_params_AS_IS.json")
@@ -39,7 +62,7 @@ def main() -> int:
     AS_metadata = fetch_attr_metadata("AS")
     IS_metadata = fetch_attr_metadata("InfraSluzba")
 
-    enums: Dict[str, Dict[str, str]] = {}
+    enums: dict[str, dict[str, str]] = {}
     print("Fetching enums (AS)...", flush=True)
     get_enums_needed(AS_metadata, enums)
     print("Fetching enums (InfraSluzba)...", flush=True)
@@ -59,7 +82,6 @@ def main() -> int:
     raw_dump_AS_meta.write_text(json.dumps(AS_metadata, ensure_ascii=False, indent=2), encoding="utf-8")
     raw_dump_IS_meta.write_text(json.dumps(IS_metadata, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    # merged metadata from schema (only valid params)
     merged_meta = merge_attribute_metadata(AS_metadata, IS_metadata, schema)
     (raw_dump_dir / "AS_IS_merged_meta.json").write_text(
         json.dumps(merged_meta, ensure_ascii=False, indent=2),
@@ -72,7 +94,6 @@ def main() -> int:
     (raw_dump_dir / "AS_harmonized.json").write_text(json.dumps(AS_harmonized, ensure_ascii=False, indent=2), encoding="utf-8")
     (raw_dump_dir / "InfraSluzba_harmonized.json").write_text(json.dumps(IS_harmonized, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    # single combined dataset
     combined = AS_harmonized + IS_harmonized
     (raw_dump_dir / "AS_IS_combined.json").write_text(json.dumps(combined, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -110,9 +131,7 @@ def main() -> int:
     print(f"Wrote Excel: {xlsx_path10}", flush=True)
 
     path_json_res = egov_dir / "CloudSluzba.json"
-
     standard_format_json = standardize_data(combined, merged_meta, attr_order=important, sort_by="Gen_Profil_nazov")
-
     path_json_res.write_text(json.dumps(standard_format_json, ensure_ascii=False, indent=2), encoding="utf-8")
 
     return 0

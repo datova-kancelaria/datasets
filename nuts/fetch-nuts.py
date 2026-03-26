@@ -1,14 +1,74 @@
 from __future__ import annotations
 
+import argparse
 import time
-import json
-import requests
-import pandas as pd
-from typing import TypeAlias, Any
-from tqdm import tqdm
 from pathlib import Path
+from typing import Any
+
+import pandas as pd
+import requests
+from tqdm import tqdm
 
 URI_root = "https://rageo.minv.sk/opendata/katalog.json"
+
+name_to_abb = {
+    "Banskobystrický": "BBSK",
+    "Bratislavský": "BSK",
+    "Nitriansky": "NSK",
+    "Košický": "KSK",
+    "Prešovský": "PSK",
+    "Trenčiansky": "TSK",
+    "Trnavský": "TTSK",
+    "Žilinský": "ZSK",
+}
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--out-dir",
+        type=Path,
+        default=Path(__file__).resolve().parents[1] / "data" / "location",
+        help="Directory where NUTS/location CSV files will be written",
+    )
+    parser.add_argument(
+        "--refresh-days",
+        type=int,
+        default=None,
+        help="Skip refresh when kraje.csv is newer than this many days",
+    )
+    return parser.parse_args()
+
+
+def effective_refresh_days(cli_value: int | None) -> int:
+    if cli_value is not None:
+        return cli_value
+    import os
+    return int(os.environ.get("LOCATION_DATA_DAYS_REFRESH", "30"))
+
+
+def is_fresh(path: Path, refresh_days: int) -> bool:
+    if refresh_days < 0 or not path.exists():
+        return False
+    age_seconds = time.time() - path.stat().st_mtime
+    return age_seconds < refresh_days * 86400
+
+
+def expected_files(out_dir: Path) -> list[Path]:
+    return [out_dir / "kraje.csv"] + [
+        out_dir / f"{abb}.csv" for abb in name_to_abb.values()
+    ]
+
+
+def should_refresh(out_dir: Path, refresh_days: int) -> bool:
+    files = expected_files(out_dir)
+
+    if any(not p.exists() for p in files):
+        return True
+
+    sentinel = out_dir / "kraje.csv"
+    return not is_fresh(sentinel, refresh_days)
+
 
 def fetch_json_with_retry(
     url: str,
@@ -19,7 +79,6 @@ def fetch_json_with_retry(
     backoff: float = 1.5,
 ) -> dict[str, Any] | None:
     s = session or requests
-    last_err: Exception | None = None
 
     for attempt in range(tries):
         try:
@@ -27,7 +86,6 @@ def fetch_json_with_retry(
             resp.raise_for_status()
             return resp.json()
         except (requests.exceptions.RequestException, ValueError) as e:
-            last_err = e
             if attempt < tries - 1:
                 time.sleep(backoff ** attempt)
             else:
@@ -35,13 +93,15 @@ def fetch_json_with_retry(
 
     return None
 
+
 def parse_dataset(uri: str) -> list[str]:
     r = fetch_json_with_retry(uri)
+    if r is None:
+        return []
 
     graph = r.get("@graph", [])
-
     for g in graph:
-        ds = g.get("dcat:dataset", None)
+        ds = g.get("dcat:dataset")
         if ds is not None:
             return [o["iri"] for o in ds]
     return []
@@ -49,7 +109,6 @@ def parse_dataset(uri: str) -> list[str]:
 
 def collect_features(uris: list[str]) -> list[dict[str, Any]]:
     s = requests.Session()
-    
     features: list[dict[str, Any]] = []
 
     for uri in tqdm(uris, desc="Fetching datasets", unit="dataset"):
@@ -57,15 +116,16 @@ def collect_features(uris: list[str]) -> list[dict[str, Any]]:
         if r is None:
             continue
 
-        F = r.get("features", [])
-        if F:
-            for f in F:
-                if isinstance(f, dict):
-                    features.append(f)
+        current = r.get("features", [])
+        if current:
+            for feature in current:
+                if isinstance(feature, dict):
+                    features.append(feature)
         else:
             print(f"Warning: features in {uri} is empty/does not exist!")
 
     return features
+
 
 def create_table(features: list[dict[str, Any]]) -> dict[str, list[str]]:
     ids: list[str] = []
@@ -104,7 +164,8 @@ def create_table(features: list[dict[str, Any]]) -> dict[str, list[str]]:
         postalcodes.append(properties.get("postalcode", ""))
         coord_x.append(x)
         coord_y.append(y)
-    res = {
+
+    return {
         "Identifikátor": ids,
         "Kraj": nuts3_names,
         "ID kraja": nuts3_ids,
@@ -118,80 +179,56 @@ def create_table(features: list[dict[str, Any]]) -> dict[str, list[str]]:
         "Orientačné číslo celé": orientationnumbers,
         "PSČ": postalcodes,
         "ADRBOD_X": coord_x,
-        "ADRBOD_Y": coord_y
+        "ADRBOD_Y": coord_y,
     }
 
-    return res
 
-name_to_abb = {
-    "Banskobystrický": "BBSK",
-    "Bratislavský": "BSK",
-    "Nitriansky": "NSK",
-    "Košický": "KSK",
-    "Prešovský": "PSK",
-    "Trenčiansky": "TSK",
-    "Trnavský": "TTSK",
-    "Žilinský": "ZSK"
-}
+def main() -> int:
+    args = parse_args()
+    out_dir = args.out_dir
+    refresh_days = effective_refresh_days(args.refresh_days)
+    sentinel = out_dir / "kraje.csv"
 
-dest_root = "data/location/"
-Path(dest_root).mkdir(parents=True, exist_ok=True)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-print("Obtaining URIs...")
-uris = parse_dataset(URI_root)
+    if not should_refresh(out_dir, refresh_days):
+        print(f"Skipping NUTS refresh: all expected files exist and are newer than {refresh_days} days")
+        return 0
 
-print("Fetching features...")
-features = collect_features(uris)
+    print("Obtaining URIs...")
+    uris = parse_dataset(URI_root)
 
-print("Creating table...")
-table = create_table(features)
+    print("Fetching features...")
+    features = collect_features(uris)
 
-df = pd.DataFrame(table)
+    print("Creating table...")
+    table = create_table(features)
+    df = pd.DataFrame(table)
 
-print("Sorting by Kraj...")
+    print("Sorting by Kraj...")
+    df = df.sort_values("Kraj", kind="stable")
 
-df = df.sort_values("Kraj", kind="stable")
+    print("Saving to kraje...")
+    df.to_csv(out_dir / "kraje.csv", index=False)
 
-print("Saving to kraje...")
+    known = set(name_to_abb.keys())
+    seen = {k for k in df["Kraj"].dropna().unique() if str(k).strip() != ""}
 
-df.to_csv(dest_root + "kraje.csv", index=False)
+    missing = sorted(seen - known)
+    if missing:
+        print("Warning: Kraj values not in name_to_abb:")
+        for kraj in missing:
+            print(f"  - {kraj}")
 
-'''
-MAX_ROWS = 1_048_576 # magic number 
-chunk_rows = MAX_ROWS - 1  # keep header
+    print("Saving to individual...")
+    for kraj, abb in name_to_abb.items():
+        df_k = df[df["Kraj"] == kraj]
+        if df_k.empty:
+            continue
+        df_k.to_csv(out_dir / f"{abb}.csv", index=False)
 
-n = len(df)
-parts = (n + chunk_rows - 1) // chunk_rows
+    return 0
 
-for i in range(parts):
-    lo = i * chunk_rows
-    hi = min(n, (i + 1) * chunk_rows)
-    out = dest_root + f"kraje_part{i+1:02d}.xlsx"
-    print(f"Saving {out} rows {lo}:{hi} ...")
-    df.iloc[lo:hi].to_excel(out, index=False)
-'''
 
-known = set(name_to_abb.keys())
-seen = {k for k in df["Kraj"].dropna().unique() if str(k).strip() != ""}
-
-missing = sorted(seen - known)
-if missing:
-    print("Warning: Kraj values not in name_to_abb:")
-    for k in missing:
-        print(f"  - {k}")
-
-print("Saving to individual...")
-
-for kraj, abb in name_to_abb.items():
-    df_k = df[df["Kraj"] == kraj]
-    if df_k.empty:
-        continue
-
-    df_k.to_csv(dest_root + f"{abb}.csv", index=False)
-
-    '''
-    if len(df_k) <= MAX_ROWS:
-        df_k.to_excel(dest_root + f"{abb}.xlsx", index=False)
-    else:
-        print(f"Skipping Excel for {kraj} ({abb}): {len(df_k)} rows > Excel limit")
-    '''
+if __name__ == "__main__":
+    raise SystemExit(main())
