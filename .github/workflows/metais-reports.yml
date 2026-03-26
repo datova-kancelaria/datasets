@@ -69,6 +69,9 @@ jobs:
           set -euo pipefail
           ./scripts/build-data.sh
 
+      - name: Generate directory index pages
+        run: python3 make_index.py "${{ steps.runner_env.outputs.data_root }}"
+
       - name: Upload data artifact
         uses: actions/upload-artifact@v4
         with:
@@ -87,17 +90,11 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
       - name: Download data artifact
         uses: actions/download-artifact@v5
         with:
           name: site-data
           path: ./data
-
-      - name: Generate directory index pages
-        run: python3 make_index.py ./data
 
       - name: Setup pages
         uses: actions/configure-pages@v5
