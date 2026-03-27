@@ -57,9 +57,9 @@
         "xml": {
           "enabled": true,
           "window": { "mode": "calendar_month", "size": 1 },
-          "merge_strategy": "keep_chunks",
-          "keep_chunks": true,
-          "postprocess": []
+          "merge_strategy": "rdfxml_graph",
+          "keep_chunks": false,
+          "postprocess": ["jsonld"]
         }
       }
     },
@@ -75,9 +75,9 @@
         "xml": {
           "enabled": true,
           "window": { "mode": "calendar_month", "size": 1 },
-          "merge_strategy": "keep_chunks",
-          "keep_chunks": true,
-          "postprocess": []
+          "merge_strategy": "rdfxml_graph",
+          "keep_chunks": false,
+          "postprocess": ["jsonld"]
         }
       }
     },
@@ -93,9 +93,9 @@
         "xml": {
           "enabled": true,
           "window": { "mode": "calendar_month", "size": 1 },
-          "merge_strategy": "keep_chunks",
-          "keep_chunks": true,
-          "postprocess": []
+          "merge_strategy": "rdfxml_graph",
+          "keep_chunks": false,
+          "postprocess": ["jsonld"]
         }
       }
     }

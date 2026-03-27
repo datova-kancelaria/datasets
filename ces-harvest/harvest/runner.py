@@ -10,7 +10,7 @@ import requests
 from .ces_api import create_od001_request, decode_payload_from_od002, poll_od002_until_done
 from .date_rules import split_range
 from .io_utils import atomic_write_bytes, load_meta, meta_matches, write_meta
-from .mergers import merge_csv_chunks, merge_rdfxml_chunks, write_chunk_manifest
+from .mergers import RDFXMLMergeError, merge_csv_chunks, merge_rdfxml_chunks, write_chunk_manifest
 from .models import AppSettings, HarvestJob, RunResult
 
 
@@ -126,10 +126,12 @@ def run_job(
             chunk_files=chunk_files,
             merged=False,
             reason=f"chunks collected so far; merge_strategy={job.merge_strategy}",
+            merge_outcome="collecting_chunks",
         )
 
-    if len(chunk_files) == 1:
-        atomic_write_bytes(job.out_path, chunk_files[0].read_bytes())
+    if len(chunk_files) == 1 and job.merge_strategy != "rdfxml_graph":
+        payload = chunk_files[0].read_bytes()
+        atomic_write_bytes(job.out_path, payload)
         write_meta(job.meta_path, want)
 
         write_chunk_manifest(
@@ -143,6 +145,13 @@ def run_job(
             merged=True,
             reason="single payload",
             main_output=job.out_path,
+            merge_outcome="success_first_try",
+            merge_details={
+                "outcome": "success_first_try",
+                "detail": "single payload copied without merge",
+                "usedPostprocessRetry": False,
+                "repairedChunks": [],
+            },
         )
 
         if job.touch_mtime_to_range_end:
@@ -173,6 +182,7 @@ def run_job(
             chunk_files=chunk_files,
             merged=False,
             reason=f"merge_strategy={job.merge_strategy}",
+            merge_outcome="skipped_if_chunked",
         )
         return RunResult(
             dataset=job.dataset,
@@ -197,6 +207,7 @@ def run_job(
             chunk_files=chunk_files,
             merged=False,
             reason=f"merge_strategy={job.merge_strategy}",
+            merge_outcome="kept_chunks",
         )
         write_meta(job.meta_path, want)
 
@@ -216,12 +227,51 @@ def run_job(
             message="kept chunks",
         )
 
+    merge_outcome: str | None = None
+    merge_details: dict[str, object] | None = None
+
     if job.merge_strategy == "csv_header":
         merged = merge_csv_chunks([p.read_bytes() for p in chunk_files])
+        merge_outcome = "success_first_try"
+        merge_details = {
+            "outcome": "success_first_try",
+            "detail": "merged CSV chunks on first try",
+            "usedPostprocessRetry": False,
+            "repairedChunks": [],
+        }
     elif job.merge_strategy == "rdfxml_graph":
-        merged = merge_rdfxml_chunks([p.read_bytes() for p in chunk_files])
+        try:
+            merged, merge_details = merge_rdfxml_chunks(
+                [p.read_bytes() for p in chunk_files],
+                dataset=job.dataset,
+                chunk_names=[p.name for p in chunk_files],
+                enable_postprocess_retry=True,
+            )
+            merge_outcome = str(merge_details.get("outcome"))
+        except RDFXMLMergeError as e:
+            write_chunk_manifest(
+                chunk_dir / "manifest.json",
+                dataset=job.dataset,
+                fmt=job.fmt,
+                d_from=job.d_from.isoformat(),
+                d_to=job.d_to.isoformat(),
+                merge_strategy=job.merge_strategy,
+                chunk_files=chunk_files,
+                merged=False,
+                reason=str(e),
+                merge_outcome=str(e.report.get("outcome", "failed_after_postprocess")),
+                merge_details=e.report,
+            )
+            raise
     elif job.merge_strategy == "concat":
         merged = b"".join(p.read_bytes() for p in chunk_files)
+        merge_outcome = "success_first_try"
+        merge_details = {
+            "outcome": "success_first_try",
+            "detail": "concatenated chunks on first try",
+            "usedPostprocessRetry": False,
+            "repairedChunks": [],
+        }
     else:
         raise ValueError(f"Unsupported merge strategy: {job.merge_strategy}")
 
@@ -237,8 +287,10 @@ def run_job(
         merge_strategy=job.merge_strategy,
         chunk_files=chunk_files,
         merged=True,
-        reason=f"merged using {job.merge_strategy}",
+        reason=(merge_details.get("detail") if merge_details else f"merged using {job.merge_strategy}"),
         main_output=job.out_path,
+        merge_outcome=merge_outcome,
+        merge_details=merge_details,
     )
 
     if job.touch_mtime_to_range_end:

@@ -29,7 +29,7 @@ CES data harvesting pipeline.
 
 ```bash
 python -m harvest \
-  --config config/datasets.example.json \
+  --config config/datasets.json \
   --org-name MIRRI
 ```
 
@@ -37,7 +37,7 @@ List orgs:
 
 ```bash
 python -m harvest \
-  --config config/datasets.example.json \
+  --config config/datasets.json \
   --list-orgs
 ```
 
@@ -45,7 +45,7 @@ Dry run:
 
 ```bash
 python -m harvest \
-  --config config/datasets.example.json \
+  --config config/datasets.json \
   --org-name MIRRI \
   --dry-run
 ```
@@ -92,6 +92,14 @@ Merge strategies:
 - `skip_if_chunked`
 
 ## XML note
+
+For RDF/XML merges, the runner first tries the raw XML as-is. If graph parsing fails, it retries after applying `harvest/rdfxml_repair.py` to each chunk. The chunk manifest records whether the merge succeeded on the first try, succeeded after postprocessing, or still failed after postprocessing. The chunk manifest records whether the result was:
+
+- `success_first_try`
+- `success_after_postprocess`
+- `failed_after_postprocess`
+
+The repair hook is intentionally a scaffold: add targeted string/regex fixes inside `repair_rdfxml_text()`.
 
 For problematic XML years such as 2025, configure XML like this:
 
