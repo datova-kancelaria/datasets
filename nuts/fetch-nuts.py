@@ -135,6 +135,12 @@ def parse_dataset(uri: str) -> list[str]:
     return []
 
 
+def clean_str(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value)
+
+
 def feature_to_row(feature: dict[str, Any]) -> list[str]:
     properties = feature.get("properties") or {}
     geometry = feature.get("geometry") or {}
@@ -143,41 +149,55 @@ def feature_to_row(feature: dict[str, Any]) -> list[str]:
     y = coords[1] if len(coords) >= 2 else ""
 
     return [
-        str(properties.get("identifier", "")),
-        str(properties.get("nuts3_name", "")),
-        str(properties.get("nuts3_id", "")),
-        str(properties.get("lau1_name", "")),
-        str(properties.get("lau1_id", "")),
-        str(properties.get("lau2_name", "")),
-        str(properties.get("lau2_id", "")),
-        str(properties.get("district_name", "")),
-        str(properties.get("streetname", "")),
-        str(properties.get("propertyregistrationnumber", "")),
-        str(properties.get("orientationnumber", "")),
-        str(properties.get("postalcode", "")),
+        clean_str(properties.get("identifier")),
+        clean_str(properties.get("nuts3_name")),
+        clean_str(properties.get("nuts3_id")),
+        clean_str(properties.get("lau1_name")),
+        clean_str(properties.get("lau1_id")),
+        clean_str(properties.get("lau2_name")),
+        clean_str(properties.get("lau2_id")),
+        clean_str(properties.get("district_name")),
+        clean_str(properties.get("streetname")),
+        clean_str(properties.get("propertyregistrationnumber")),
+        clean_str(properties.get("orientationnumber")),
+        clean_str(properties.get("postalcode")),
         str(x),
         str(y),
     ]
 
 
 def open_region_writers(out_dir: Path):
-    files: dict[str, Any] = {}
-    writers: dict[str, csv.writer] = {}
+    region_files: dict[str, Any] = {}
+    region_writers: dict[str, csv.writer] = {}
 
     for kraj, abb in name_to_abb.items():
         path = out_dir / f"{abb}.csv"
         f = path.open("w", newline="", encoding="utf-8")
         w = csv.writer(f)
         w.writerow(HEADER)
-        files[kraj] = f
-        writers[kraj] = w
+        region_files[kraj] = f
+        region_writers[kraj] = w
 
     unknown_path = out_dir / "_UNKNOWN.csv"
     unknown_file = unknown_path.open("w", newline="", encoding="utf-8")
     unknown_writer = csv.writer(unknown_file)
     unknown_writer.writerow(HEADER)
 
-    return files, writers, unknown_file, unknown_writer, unknown_path
+    pending_path = out_dir / "_PENDING_UNKNOWN.csv"
+    pending_file = pending_path.open("w", newline="", encoding="utf-8")
+    pending_writer = csv.writer(pending_file)
+    pending_writer.writerow(HEADER)
+
+    return (
+        region_files,
+        region_writers,
+        unknown_file,
+        unknown_writer,
+        unknown_path,
+        pending_file,
+        pending_writer,
+        pending_path,
+    )
 
 
 def file_has_data_rows(path: Path) -> bool:
@@ -185,7 +205,7 @@ def file_has_data_rows(path: Path) -> bool:
         return False
     with path.open("r", newline="", encoding="utf-8") as f:
         reader = csv.reader(f)
-        next(reader, None)  # header
+        next(reader, None)
         return next(reader, None) is not None
 
 
@@ -195,9 +215,73 @@ def append_csv_without_header(dst_writer: csv.writer, src_path: Path) -> None:
 
     with src_path.open("r", newline="", encoding="utf-8") as fin:
         reader = csv.reader(fin)
-        next(reader, None)  # skip header
+        next(reader, None)
         for row in reader:
             dst_writer.writerow(row)
+
+
+def learn_region_maps(
+    row: list[str],
+    okres_id_to_region: dict[str, tuple[str, str]],
+    okres_name_to_region: dict[str, tuple[str, str]],
+    obec_id_to_region: dict[str, tuple[str, str]],
+    obec_name_to_region: dict[str, tuple[str, str]],
+) -> None:
+    kraj = row[1].strip()
+    kraj_id = row[2].strip()
+    okres = row[3].strip()
+    okres_id = row[4].strip()
+    obec = row[5].strip()
+    obec_id = row[6].strip()
+
+    if not kraj or not kraj_id:
+        return
+
+    region = (kraj, kraj_id)
+
+    if okres_id:
+        okres_id_to_region.setdefault(okres_id, region)
+    if okres:
+        okres_name_to_region.setdefault(okres, region)
+    if obec_id:
+        obec_id_to_region.setdefault(obec_id, region)
+    if obec:
+        obec_name_to_region.setdefault(obec, region)
+
+
+def try_fill_missing_kraj(
+    row: list[str],
+    okres_id_to_region: dict[str, tuple[str, str]],
+    okres_name_to_region: dict[str, tuple[str, str]],
+    obec_id_to_region: dict[str, tuple[str, str]],
+    obec_name_to_region: dict[str, tuple[str, str]],
+) -> bool:
+    kraj = row[1].strip()
+
+    if kraj in name_to_abb:
+        return True
+
+    okres = row[3].strip()
+    okres_id = row[4].strip()
+    obec = row[5].strip()
+    obec_id = row[6].strip()
+
+    region: tuple[str, str] | None = None
+
+    if okres_id and okres_id in okres_id_to_region:
+        region = okres_id_to_region[okres_id]
+    elif obec_id and obec_id in obec_id_to_region:
+        region = obec_id_to_region[obec_id]
+    elif okres and okres in okres_name_to_region:
+        region = okres_name_to_region[okres]
+    elif obec and obec in obec_name_to_region:
+        region = obec_name_to_region[obec]
+
+    if region is None:
+        return False
+
+    row[1], row[2] = region
+    return True
 
 
 def build_kraje_csv(out_dir: Path, unknown_path: Path) -> None:
@@ -212,6 +296,58 @@ def build_kraje_csv(out_dir: Path, unknown_path: Path) -> None:
 
         if file_has_data_rows(unknown_path):
             append_csv_without_header(writer, unknown_path)
+
+
+def resolve_pending_rows(
+    pending_path: Path,
+    unknown_writer: csv.writer,
+    region_writers: dict[str, csv.writer],
+    seen_unknown_kraje: set[str],
+    okres_id_to_region: dict[str, tuple[str, str]],
+    okres_name_to_region: dict[str, tuple[str, str]],
+    obec_id_to_region: dict[str, tuple[str, str]],
+    obec_name_to_region: dict[str, tuple[str, str]],
+) -> None:
+    if not pending_path.exists():
+        return
+
+    with pending_path.open("r", newline="", encoding="utf-8") as f:
+        reader = csv.reader(f)
+        next(reader, None)
+        for row in reader:
+            filled = try_fill_missing_kraj(
+                row,
+                okres_id_to_region,
+                okres_name_to_region,
+                obec_id_to_region,
+                obec_name_to_region,
+            )
+
+            if filled:
+                learn_region_maps(
+                    row,
+                    okres_id_to_region,
+                    okres_name_to_region,
+                    obec_id_to_region,
+                    obec_name_to_region,
+                )
+
+                kraj = row[1].strip()
+                if kraj in region_writers:
+                    region_writers[kraj].writerow(row)
+                    continue
+
+            unknown_writer.writerow(row)
+            kraj = row[1].strip()
+            if kraj:
+                seen_unknown_kraje.add(kraj)
+
+
+def remove_if_header_only(path: Path) -> None:
+    if not path.exists():
+        return
+    if not file_has_data_rows(path):
+        path.unlink()
 
 
 def main() -> int:
@@ -231,14 +367,35 @@ def main() -> int:
     uris = parse_dataset(URI_root)
 
     print("Opening region files...")
-    region_files, region_writers, unknown_file, unknown_writer, unknown_path = open_region_writers(out_dir)
+    (
+        region_files,
+        region_writers,
+        unknown_file,
+        unknown_writer,
+        unknown_path,
+        pending_file,
+        pending_writer,
+        pending_path,
+    ) = open_region_writers(out_dir)
+
     seen_unknown_kraje: set[str] = set()
+
+    okres_id_to_region: dict[str, tuple[str, str]] = {}
+    okres_name_to_region: dict[str, tuple[str, str]] = {}
+    obec_id_to_region: dict[str, tuple[str, str]] = {}
+    obec_name_to_region: dict[str, tuple[str, str]] = {}
 
     try:
         s = requests.Session()
 
         for uri in tqdm(uris, desc="Fetching datasets", unit="dataset"):
-            r = fetch_json_with_retry(uri, session=s, tries=6, timeout=30.0, backoff=1.7)
+            r = fetch_json_with_retry(
+                uri,
+                session=s,
+                tries=6,
+                timeout=30.0,
+                backoff=1.7,
+            )
             if r is None:
                 continue
 
@@ -252,22 +409,61 @@ def main() -> int:
                     continue
 
                 row = feature_to_row(feature)
+
+                learn_region_maps(
+                    row,
+                    okres_id_to_region,
+                    okres_name_to_region,
+                    obec_id_to_region,
+                    obec_name_to_region,
+                )
+
+                filled = try_fill_missing_kraj(
+                    row,
+                    okres_id_to_region,
+                    okres_name_to_region,
+                    obec_id_to_region,
+                    obec_name_to_region,
+                )
+
+                if filled:
+                    learn_region_maps(
+                        row,
+                        okres_id_to_region,
+                        okres_name_to_region,
+                        obec_id_to_region,
+                        obec_name_to_region,
+                    )
+
                 kraj = row[1].strip()
 
                 if kraj in region_writers:
                     region_writers[kraj].writerow(row)
                 else:
-                    unknown_writer.writerow(row)
-                    if kraj:
-                        seen_unknown_kraje.add(kraj)
+                    pending_writer.writerow(row)
 
             del r
             del current
+
+        resolve_pending_rows(
+            pending_path,
+            unknown_writer,
+            region_writers,
+            seen_unknown_kraje,
+            okres_id_to_region,
+            okres_name_to_region,
+            obec_id_to_region,
+            obec_name_to_region,
+        )
 
     finally:
         for f in region_files.values():
             f.close()
         unknown_file.close()
+        pending_file.close()
+
+    remove_if_header_only(unknown_path)
+    remove_if_header_only(pending_path)
 
     if seen_unknown_kraje:
         print("Warning: Kraj values not in name_to_abb:")
