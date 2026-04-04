@@ -1,116 +1,184 @@
-# CES harvest pipeline (refactored)
+# ces-harvest
 
-CES data harvesting pipeline.
+Harvests datasets from CES open-data endpoints and writes them to a filesystem tree according to a JSON schedule config.
 
-## Highlights
+## What it does
 
-- Dataset scheduling is driven by JSON config
-- Range paging/windowing is per-format and configurable (`none`, `days`, `calendar_month`, `calendar_quarter`, `calendar_year`).
-- XML can use a conservative `keep_chunks` strategy for years/ranges that do not merge cleanly.
-- Credentials are loaded at runtime
-- The runner returns structured results instead of pretending every job yields one merged file.
+`ces-harvest` talks to the CES OD_001 / OD_002 / OD_003 endpoints, chooses an organization, plans dataset/date windows from `config/datasets.json`, downloads the payloads, and then optionally merges or postprocesses them.
 
-## Package layout
+It supports:
 
+- per-dataset schedules
+- per-format enable/disable flags
+- chunking large time ranges into smaller windows
+- CSV merging
+- RDF/XML graph merge with a repair retry path
+- postprocessing such as CSV → XLSX and RDF/XML → JSON-LD
+- dry-run and selective dataset inclusion/exclusion
+
+## Files and directories
+
+- `run.sh` — wrapper that launches the Python package under `systemd-run` with `LoadCredential=`
+- `config/datasets.json` — dataset scheduling and output config
 - `harvest/__main__.py` — CLI entrypoint
-- `harvest/settings.py` — URLs, credentials, session setup
-- `harvest/models.py` — dataclasses / types
-- `harvest/ces_api.py` — OD_001 / OD_002 / OD_003 transport
-- `harvest/orgs.py` — org matching and org-code cache
-- `harvest/io_utils.py` — atomic write + metadata helpers
-- `harvest/date_rules.py` — date/window helpers
-- `harvest/dataset_config.py` — config loading/normalization
-- `harvest/planner.py` — config -> jobs
-- `harvest/mergers.py` — CSV merge, XML merge, chunk manifest
-- `harvest/postprocess.py` — CSV->XLSX, RDF/XML->JSON-LD
-- `harvest/runner.py` — job execution
+- `harvest/ces_api.py` — OD_001 / OD_002 / OD_003 HTTP calls
+- `harvest/planner.py` — expands schedules into concrete jobs
+- `harvest/runner.py` — executes jobs, writes chunks, merges and postprocesses
+- `harvest/mergers.py` — CSV and RDF/XML merge logic
+- `harvest/postprocess.py` — extra output conversions
 
-## Example usage
+## Runtime requirements
 
-```bash
-python -m harvest \
-  --config config/datasets.json \
-  --org-name MIRRI
-```
+This module is the only part of the repo that requires non-public credentials.
 
-List orgs:
+Required when CES is enabled:
 
-```bash
-python -m harvest \
-  --config config/datasets.json \
-  --list-orgs
-```
-
-Dry run:
-
-```bash
-python -m harvest \
-  --config config/datasets.json \
-  --org-name MIRRI \
-  --dry-run
-```
-
-## Credentials
-
-- `CREDENTIALS_DIRECTORY` must be set
-- files expected inside it:
+- `CES_ORG_NAME`
+- `CES_SECRETS_DIR`
+- credential files inside `CES_SECRETS_DIR`:
   - `APIKEY`
   - `USER`
   - `PASS`
 
-Optional env vars:
+Optional:
 
-- `CES_TRUST_ENV=1` — allow `requests` to use proxy env vars
-- `CES_ORG_NAME`
-- `CES_HIERARCHY_NODE_CODE`
+- `CES_CONFIG` — alternate config path. Default: `ces-harvest/config/datasets.json`
+- `CES_RUN_USER` — Unix user for `systemd-run`
+- `http_proxy`, `https_proxy`, `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`
+- `PYTHON_BIN` — defaults to `python3` if unset
 
-## Config shape
+At runtime the Python package itself expects `CREDENTIALS_DIRECTORY`, which is supplied automatically by `systemd-run -p LoadCredential=...` in `run.sh`.
+
+## Wrapper usage
+
+Typical repo-level invocation:
+
+```bash
+./ces-harvest/run.sh --out-dir /path/to/output
+```
+
+Show the command that would be run:
+
+```bash
+./ces-harvest/run.sh --print-cmd --out-dir /path/to/output
+```
+
+The wrapper always passes:
+
+- `--config <path>`
+- `--org-name "$CES_ORG_NAME"`
+- any extra CLI arguments supplied by the caller
+
+## Python CLI arguments
+
+From `python -m harvest`:
+
+- `--config PATH` — required config JSON
+- `--hierarchy-node-code CODE` — exact OD_003 code
+- `--org-name TEXT` — substring match against OD_003 org names
+- `--list-orgs` — print organizations and exit
+- `--list-orgs-filter TEXT` — filter for `--list-orgs`
+- `--no-cache-org` — do not read/write `.hierarchy_node_code.txt`
+- `--today YYYY-MM-DD` — override current date for testing
+- `--out-dir PATH` — override `defaults.out_dir` from config
+- `--dry-run` — print planned work only
+- `--force` — ignore matching metadata and refetch
+- `--start-year N`, `--end-year N` — override schedule year bounds
+- `--include-dataset NAME` — include only selected dataset(s)
+- `--exclude-dataset NAME` — skip selected dataset(s)
+
+## Config model
 
 See `config/datasets.json`.
 
-Important fields:
+Important parts:
 
-- `datasets.<name>.schedules[]`
-- `datasets.<name>.formats.csv`
-- `datasets.<name>.formats.xml`
+- `defaults.out_dir` — base output directory
+- `defaults.formats.<fmt>` — default per-format behavior
+- `datasets.<name>.schedules[]` — one or more schedules per dataset
+- `datasets.<name>.formats.<fmt>` — dataset-specific format overrides
 
-Format window examples:
+Format options:
 
-```json
-{ "mode": "none", "size": 1 }
-{ "mode": "days", "size": 30 }
-{ "mode": "calendar_month", "size": 1 }
-{ "mode": "calendar_quarter", "size": 1 }
-```
+- `enabled`
+- `window.mode`
+- `window.size`
+- `merge_strategy`
+- `postprocess`
+- `keep_chunks`
 
-Merge strategies:
+Common window modes used by the repo:
+
+- `none`
+- `calendar_month`
+
+Merge strategies implemented by the runner:
 
 - `csv_header`
 - `rdfxml_graph`
 - `concat`
-- `keep_chunks`
 - `skip_if_chunked`
+- `keep_chunks`
 
-## XML note
+## Execution flow
 
-For RDF/XML merges, the runner first tries the raw XML as-is. If graph parsing fails, it retries after applying `harvest/rdfxml_repair.py` to each chunk. The chunk manifest records whether the merge succeeded on the first try, succeeded after postprocessing, or still failed after postprocessing. The chunk manifest records whether the result was:
+1. load config JSON
+2. resolve output directory
+3. load CES credentials from `CREDENTIALS_DIRECTORY`
+4. fetch OD_003 organizations
+5. choose organization by `--hierarchy-node-code`, `--org-name`, env, or cached code
+6. build concrete harvest jobs from schedules
+7. for each job:
+   - skip if metadata already matches and the main output exists
+   - split date ranges into chunks according to `window`
+   - submit an OD_001 request whose payload contains:
+     - `datasetName`
+     - `hierarchyNodeCode`
+     - `dateFrom`
+     - `dateTo`
+     - `fileFormat`
+   - the OD_001 request body is sent as JSON with:
+     - `operation: "opendata"`
+     - `payload: "..."`, where `payload` is the Base64-encoded JSON object listed above
+   - the OD_001 request creates an asynchronous export request and returns an integer `requestId`
+   - poll `OD_002/<requestId>` until the export is ready
+     - while the job is still being processed, OD_002 returns `status: "processing"`
+     - when the export is ready, OD_002 returns `status: "done"`
+     - in the `done` response, the exported dataset is carried in the same OD_002 response under `payload`
+     - `payload` is a Base64-encoded string containing the raw output file bytes (for example CSV or XML, depending on the requested format)
+     - the runner decodes that Base64 string and writes the resulting bytes to the chunk file
+   - write chunk payloads
+   - merge or keep chunks according to `merge_strategy`
+   - run postprocessing steps
+   - write metadata and chunk manifest files
 
-- `success_first_try`
-- `success_after_postprocess`
-- `failed_after_postprocess`
+## Output behavior
 
-The repair hook is intentionally a scaffold: add targeted string/regex fixes inside `repair_rdfxml_text()`.
+Depending on the schedule and format, a dataset may produce:
 
-For problematic XML years such as 2025, configure XML like this:
+- a single merged file
+- multiple chunk files plus a manifest
+- postprocessed derivatives such as `.xlsx` or `.jsonld`
 
-```json
-{
-  "enabled": true,
-  "window": { "mode": "calendar_month", "size": 1 },
-  "merge_strategy": "keep_chunks",
-  "postprocess": [],
-  "keep_chunks": true
-}
-```
+The runner does not pretend every dataset produces one merged file. `RunResult` records whether the dataset was skipped, merged, or left as chunks.
 
-That preserves the XML chunks and writes a manifest without lying that a merged XML exists.
+## XML merge note
+
+For RDF/XML merges, the runner first attempts a normal graph parse/merge. If that fails, it retries after applying `harvest/rdfxml_repair.py` to the chunks. The manifest records whether the merge succeeded immediately, succeeded after repair, or failed after the retry.
+
+## CES endpoint details
+
+The CES flow is asynchronous:
+
+- `OD_003` lists available organizations / hierarchy nodes
+- `OD_001` creates an export request
+- `OD_002/<requestId>` is polled until the request finishes
+
+In the current implementation:
+
+- `OD_001` is called as a JSON `POST`
+- the top-level request body contains `operation` and `payload`
+- `payload` is not raw JSON; it is a Base64-encoded JSON object
+- after `OD_002` returns `status: "done"`, the runner reads the dataset from the same OD_002 response field `payload`
+- that `payload` is Base64-decoded into raw file bytes and written directly to disk
+- `responsePath` is not used by the current implementation

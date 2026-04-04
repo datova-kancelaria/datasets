@@ -1,0 +1,186 @@
+# datasets
+
+Public-data harvesting pipeline for three modules:
+
+- `egov/` — MetaIS public report exports plus cloud service extraction from public CMDB endpoints
+- `nuts/` — location / address datasets from `rageo.minv.sk`
+- `ces-harvest/` — CES open-data harvesting that requires local CES credential files when enabled
+
+The repository is designed to run either:
+
+- locally from a clone, or
+- in GitHub Actions on a self-hosted runner
+
+The pipeline is controlled entirely by environment variables. You do **not** need to edit code in order to change output locations or disable modules.
+
+## Module enable / disable
+
+Each top-level module is controlled by its output directory variable:
+
+- `EGOV_OUT_DIR`
+- `LOCATION_OUT_DIR`
+- `FINANCE_OUT_DIR`
+
+Behavior:
+
+- variable **unset** → use the default path under `DATA_ROOT`
+- variable set to a **non-empty** path → run the module there
+- variable set to the **empty string** → skip that module completely
+
+This skip-by-empty-dir behavior is implemented in both:
+
+- `scripts/build-data.sh`
+- `.github/workflows/metais-reports.yml`
+
+So, for example, if `FINANCE_OUT_DIR=""`, the CES module is skipped and the workflow does not require or validate `CES_ORG_NAME`, `CES_SECRETS_DIR`, or CES credential files.
+
+## Secrets and credentials
+
+There are **no GitHub Actions repository secrets** required by this repo.
+
+The `egov` and `nuts` modules use public endpoints.
+
+The `ces-harvest` module still requires local credential files when enabled:
+
+- `APIKEY`
+- `USER`
+- `PASS`
+
+These are provided from a machine-local directory via `CES_SECRETS_DIR` and passed into `systemd-run` by `ces-harvest/run.sh`.
+
+## Repository layout
+
+- `scripts/build-data.sh` — top-level orchestrator run by GitHub Actions and suitable for local runs
+- `.github/workflows/metais-reports.yml` — self-hosted runner workflow
+- `runner-env.example.sh` — example machine-local environment file
+- `make_index.py` — builds directory index pages for the harvested output tree
+- `egov/` — MetaIS public report and CMDB cloud-service pipeline
+- `nuts/` — location/address CSV harvesting
+- `ces-harvest/` — CES harvesting package and wrapper script
+- `resources/` — static assets used by generated directory indexes
+
+## Setup
+
+### 1. Clone the repo
+
+```bash
+git clone https://github.com/datova-kancelaria/datasets.git
+cd datasets
+```
+
+### 2. Create the runner env file
+
+Copy `runner-env.example.sh` to a machine-local path such as:
+
+```bash
+sudo mkdir -p /opt/datasets
+sudo cp runner-env.example.sh /opt/datasets/runner-env.sh
+sudo chmod 600 /opt/datasets/runner-env.sh
+```
+
+Then edit it.
+
+### 3. Set the core environment values
+
+Typical values:
+
+```bash
+export PYTHON_BIN=/absolute/path/to/venv/bin/python
+export DATA_ROOT=/absolute/path/to/persistent/data
+
+# MIRRI harvests these and publishes into https://datova-kancelaria.github.io/datasets/egov or /location, leave empty to disable
+export EGOV_OUT_DIR=""
+export LOCATION_OUT_DIR=""
+# keep this non-empty to harvest CES data for your org
+export FINANCE_OUT_DIR="$DATA_ROOT/finance-<your-org>"
+
+export LOCATION_DATA_DAYS_REFRESH=30
+export CES_CONFIG=
+```
+
+To disable a module, set its output directory to the empty string:
+
+```bash
+export FINANCE_OUT_DIR=""
+```
+
+### 4. CES-only settings when finance is enabled
+
+Only needed when `FINANCE_OUT_DIR` is non-empty:
+
+```bash
+export CES_SECRETS_DIR=/absolute/path/to/ces-secrets
+export CES_ORG_NAME='your organization name here'
+```
+
+Expected files inside `CES_SECRETS_DIR`:
+
+- `APIKEY`
+- `USER`
+- `PASS`
+
+These are given by MFSR upon request. Do not forget to request your machine's egress IP to be whitelisted.
+
+### 5. Run the pipeline locally
+
+```bash
+source /opt/datasets/runner-env.sh
+./scripts/build-data.sh
+```
+
+### 6. Run in GitHub Actions
+
+The workflow expects `/opt/datasets/runner-env.sh` to exist on the self-hosted runner machine. It loads that file, applies defaults for unset values, skips disabled modules, builds the output tree, and finally runs `make_index.py` on `DATA_ROOT`.
+
+## What each module produces
+
+### eGov
+
+Under `EGOV_OUT_DIR`, the pipeline writes:
+
+- public report JSON files (`KS.json`, `AS.json`, `ISVS.json`, `Projekt.json`, `InfraSluzba.json`, `KRIS.json`)
+- CSV conversions of those reports
+- cloud-service extraction outputs including:
+  - `CloudSluzba.xlsx`
+  - `CloudSluzba_curated.xlsx`
+  - `CloudSluzba.json`
+  - several raw and harmonized JSON files in `raw/`
+
+### NUTS / location
+
+Under `LOCATION_OUT_DIR`, the pipeline writes:
+
+- `kraje.csv`
+- one CSV per region (`BSK.csv`, `TTSK.csv`, etc.)
+- `_UNKNOWN.csv` and `_PENDING_UNKNOWN.csv` helper outputs when region assignment cannot be resolved immediately
+
+### CES
+
+Under `FINANCE_OUT_DIR`, `ces-harvest` writes dataset outputs according to `ces-harvest/config/datasets.json`, including chunk files, merged files, manifests, and optional postprocessed derivatives.
+
+## Orchestration details
+
+`scripts/build-data.sh` currently passes:
+
+- `egov/fetch-reports.sh --out-dir <EGOV_OUT_DIR>`
+- `python egov/convert.py --data-dir <EGOV_OUT_DIR>`
+- `python egov/cloud_services.py --out-dir <EGOV_OUT_DIR>`
+- `python nuts/fetch-nuts.py --out-dir <LOCATION_OUT_DIR> --refresh-days <LOCATION_DATA_DAYS_REFRESH>`
+- `ces-harvest/run.sh --out-dir <FINANCE_OUT_DIR>`
+
+The eGov cloud-services helper has additional optional tuning flags (`--created-at-from`, `--created-at-to`, `--window-target-count`, `--page-size`, `--probe-page-size`), but the top-level orchestrator deliberately uses its defaults.
+
+## Sanity checks
+
+Disable all modules:
+
+```bash
+DATA_ROOT=/tmp/datasets-test \
+EGOV_OUT_DIR='' \
+LOCATION_OUT_DIR='' \
+FINANCE_OUT_DIR='' \
+PYTHON_BIN=python3 \
+./scripts/build-data.sh
+```
+
+This should print three `skipped (output dir disabled)` messages and exit without trying to validate CES.
