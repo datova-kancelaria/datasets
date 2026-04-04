@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import sys
+from datetime import datetime
 from pathlib import Path
 
 from helper import (
-    fetch_paged,
+    fetch_cilistfiltered_windowed,
     fetch_attr_metadata,
     get_enums_needed,
     sanitize_node,
@@ -19,6 +18,10 @@ from helper import (
 )
 
 
+def _default_created_at_to() -> str:
+    return datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -27,36 +30,76 @@ def parse_args() -> argparse.Namespace:
         default=Path(__file__).resolve().parents[1] / "data" / "egov",
         help="Directory where egov cloud-services outputs will be written",
     )
+    parser.add_argument(
+        "--created-at-from",
+        default="2000-01-01T00:00:00.000",
+        help="Lower bound for CMDB createdAt filtering (inclusive)",
+    )
+    parser.add_argument(
+        "--created-at-to",
+        default=_default_created_at_to(),
+        help="Upper bound for CMDB createdAt filtering (inclusive)",
+    )
+    parser.add_argument(
+        "--window-target-count",
+        type=int,
+        default=9500,
+        help="Split createdAt windows until probe count is strictly below this many records",
+    )
+    parser.add_argument(
+        "--page-size",
+        type=int,
+        default=1000,
+        help="Page size for cilistfiltered page fetches",
+    )
+    parser.add_argument(
+        "--probe-page-size",
+        type=int,
+        default=1,
+        help="Probe page size used while estimating window sizes",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
 
-    api_uri = os.getenv("API_URI", "")
-    api_report_num = os.getenv("METAIS_REPORT_NUM_PROD", "")
     egov_dir = args.out_dir
     raw_dump_dir = egov_dir / "raw"
     raw_dump_dir.mkdir(parents=True, exist_ok=True)
 
-    if not api_uri and not api_report_num:
-        print('One of the env variables "API_URI"/"METAIS_REPORT_NUM_PROD" must be set!', file=sys.stderr)
-        return 2
-    if api_report_num:
-        api_uri = "https://metais.slovensko.sk/api/report/reports/execute/" + api_report_num + "/type/typ?lang=sk"
-
     schema_path = Path(__file__).with_name("sync_params_AS_IS.json")
     if not schema_path.exists():
-        print(f"Schema file not found: {schema_path}", file=sys.stderr)
+        print(f"Schema file not found: {schema_path}")
         return 3
 
     schema = load_merge_schema(schema_path)
 
-    print("Fetching AS...", flush=True)
-    AS_data = fetch_paged(api_uri, "AS", page_size=5000, sleep_ms=250)
+    print(
+        f"Fetching AS via public cilistfiltered createdAt=[{args.created_at_from}, {args.created_at_to}]...",
+        flush=True,
+    )
+    AS_data, AS_windows = fetch_cilistfiltered_windowed(
+        "AS",
+        created_at_from=args.created_at_from,
+        created_at_to=args.created_at_to,
+        window_target_count=args.window_target_count,
+        page_size=args.page_size,
+        probe_page_size=args.probe_page_size,
+    )
 
-    print("Fetching InfraSluzba...", flush=True)
-    IS_data = fetch_paged(api_uri, "InfraSluzba", page_size=5000, sleep_ms=250)
+    print(
+        f"Fetching InfraSluzba via public cilistfiltered createdAt=[{args.created_at_from}, {args.created_at_to}]...",
+        flush=True,
+    )
+    IS_data, IS_windows = fetch_cilistfiltered_windowed(
+        "InfraSluzba",
+        created_at_from=args.created_at_from,
+        created_at_to=args.created_at_to,
+        window_target_count=args.window_target_count,
+        page_size=args.page_size,
+        probe_page_size=args.probe_page_size,
+    )
 
     print("Fetching attribute metadata...", flush=True)
     AS_metadata = fetch_attr_metadata("AS")
@@ -81,6 +124,8 @@ def main() -> int:
     raw_dump_IS.write_text(json.dumps(IS_clean, ensure_ascii=False, indent=2), encoding="utf-8")
     raw_dump_AS_meta.write_text(json.dumps(AS_metadata, ensure_ascii=False, indent=2), encoding="utf-8")
     raw_dump_IS_meta.write_text(json.dumps(IS_metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+    (raw_dump_dir / "AS_fetch_windows.json").write_text(json.dumps(AS_windows, ensure_ascii=False, indent=2), encoding="utf-8")
+    (raw_dump_dir / "InfraSluzba_fetch_windows.json").write_text(json.dumps(IS_windows, ensure_ascii=False, indent=2), encoding="utf-8")
 
     merged_meta = merge_attribute_metadata(AS_metadata, IS_metadata, schema)
     (raw_dump_dir / "AS_IS_merged_meta.json").write_text(

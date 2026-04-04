@@ -4,6 +4,7 @@ import json
 import random
 import sys
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Set
 
@@ -219,6 +220,361 @@ def fetch_paged(
             time.sleep(sleep_ms / 1000.0)
 
     return out
+
+
+# ----------------------------
+# Public CMDB filtered paging (cilistfiltered)
+# ----------------------------
+
+_PUBLIC_CMDB_FILTERED_URL = "https://metais.slovensko.sk/api/cmdb/read/cilistfiltered?lang=sk"
+
+
+def _parse_iso_dt(value: str) -> datetime:
+    s = value.strip()
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    dt = datetime.fromisoformat(s)
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
+
+def _fmt_iso_dt_millis(dt: datetime) -> str:
+    return dt.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+
+
+def _extract_items_from_response(data: Any) -> List[Dict[str, Any]]:
+    if isinstance(data, list):
+        return [item for item in data if isinstance(item, dict)]
+    if not isinstance(data, dict):
+        return []
+
+    for key in ("result", "content", "items", "data", "configurationItemSet", "configurationItems"):
+        if key not in data:
+            continue
+        items = _extract_items_from_response(data[key])
+        if items:
+            return items
+        if isinstance(data[key], list):
+            return [item for item in data[key] if isinstance(item, dict)]
+
+    return []
+
+
+def _extract_total_count(data: Any) -> Optional[int]:
+    if isinstance(data, int):
+        return data
+    if isinstance(data, str) and data.isdigit():
+        return int(data)
+    if not isinstance(data, dict):
+        return None
+
+    pagination = data.get("pagination")
+    if isinstance(pagination, dict):
+        for key in ("totaltems", "totalItems", "totalCount", "total", "count"):
+            value = pagination.get(key)
+            if isinstance(value, int):
+                return value
+            if isinstance(value, str) and value.isdigit():
+                return int(value)
+
+    for key in ("count", "total", "totalCount", "totalElements", "numberOfElements", "recordsTotal"):
+        value = data.get(key)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str) and value.isdigit():
+            return int(value)
+
+    for key in ("page", "pageInfo", "meta", "result"):
+        value = data.get(key)
+        total = _extract_total_count(value)
+        if total is not None:
+            return total
+
+    return None
+
+
+def _extract_total_pages(data: Any) -> Optional[int]:
+    if not isinstance(data, dict):
+        return None
+
+    pagination = data.get("pagination")
+    if isinstance(pagination, dict):
+        for key in ("totalPages", "pageCount"):
+            value = pagination.get(key)
+            if isinstance(value, int) and value > 0:
+                return value
+            if isinstance(value, str) and value.isdigit() and int(value) > 0:
+                return int(value)
+
+    for key in ("totalPages", "pageCount"):
+        value = data.get(key)
+        if isinstance(value, int) and value > 0:
+            return value
+        if isinstance(value, str) and value.isdigit() and int(value) > 0:
+            return int(value)
+
+    return None
+
+
+def _build_cilistfiltered_payload(
+    entity_name: str,
+    *,
+    page: int,
+    perpage: int,
+    created_at_from: str,
+    created_at_to: str,
+    states: List[str],
+) -> Dict[str, Any]:
+    return {
+        "filter": {
+            "type": [entity_name],
+            "metaAttributes": {
+                "state": states,
+                "createdAtFrom": created_at_from,
+                "createdAtTo": created_at_to,
+            },
+        },
+        "page": page,
+        "perpage": perpage,
+        "sortBy": "createdAt",
+        "sortType": "ASC",
+    }
+
+
+def probe_cilistfiltered_window(
+    entity_name: str,
+    *,
+    created_at_from: str,
+    created_at_to: str,
+    states: List[str],
+    probe_page_size: int = 1,
+) -> Tuple[Optional[int], List[Dict[str, Any]]]:
+    payload = _build_cilistfiltered_payload(
+        entity_name,
+        page=1,
+        perpage=probe_page_size,
+        created_at_from=created_at_from,
+        created_at_to=created_at_to,
+        states=states,
+    )
+    data = post_json(_PUBLIC_CMDB_FILTERED_URL, payload)
+    items = _extract_items_from_response(data)
+    total = _extract_total_count(data)
+
+    if total is None:
+        if len(items) < probe_page_size:
+            total = len(items)
+        elif not items:
+            total = 0
+
+    return total, items
+
+
+def fetch_cilistfiltered_pages(
+    entity_name: str,
+    *,
+    created_at_from: str,
+    created_at_to: str,
+    states: List[str],
+    page_size: int = 1000,
+    sleep_s: float = 0.1,
+    verbose: bool = True,
+) -> Tuple[List[Dict[str, Any]], Optional[int]]:
+    page = 1
+    out: List[Dict[str, Any]] = []
+    total_pages: Optional[int] = None
+
+    while True:
+        t0 = time.perf_counter()
+        payload = _build_cilistfiltered_payload(
+            entity_name,
+            page=page,
+            perpage=page_size,
+            created_at_from=created_at_from,
+            created_at_to=created_at_to,
+            states=states,
+        )
+        data = post_json(_PUBLIC_CMDB_FILTERED_URL, payload)
+        items = _extract_items_from_response(data)
+        if total_pages is None:
+            total_pages = _extract_total_pages(data)
+        dt = time.perf_counter() - t0
+
+        if verbose:
+            print(
+                f"[{entity_name}] createdAt=[{created_at_from}, {created_at_to}] page={page} got={len(items)} total={len(out) + len(items)} total_pages={total_pages!r} ({dt:.2f}s)",
+                flush=True,
+            )
+
+        if not items:
+            break
+
+        out.extend(items)
+
+        if total_pages is not None and page >= total_pages:
+            break
+        if total_pages is None and len(items) < page_size:
+            break
+
+        page += 1
+        if sleep_s:
+            time.sleep(sleep_s)
+
+    return out, total_pages
+
+
+def _entity_identity(entity: Dict[str, Any]) -> str | None:
+    for key in ("uuid", "UUID"):
+        value = entity.get(key)
+        if value:
+            return str(value)
+
+    cfg = entity.get("configurationItemSet")
+    if isinstance(cfg, dict):
+        value = cfg.get("uuid") or cfg.get("UUID")
+        if value:
+            return str(value)
+
+    return None
+
+
+def _entity_rank(entity: Dict[str, Any]) -> Tuple[float, int]:
+    meta = entity.get("metaAttributes") or {}
+    stamp = meta.get("lastModifiedAt") or meta.get("createdAt") or entity.get("lastModifiedAt") or entity.get("createdAt")
+    ts = float("-inf")
+    if isinstance(stamp, str) and stamp.strip():
+        try:
+            ts = _parse_iso_dt(stamp).timestamp()
+        except ValueError:
+            ts = float("-inf")
+
+    raw_id = entity.get("id")
+    try:
+        rid = int(raw_id)
+    except (TypeError, ValueError):
+        rid = 0
+
+    return ts, rid
+
+
+def _dedupe_entities_keep_latest(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    by_uuid: Dict[str, Dict[str, Any]] = {}
+    passthrough: List[Dict[str, Any]] = []
+
+    for item in items:
+        ident = _entity_identity(item)
+        if not ident:
+            passthrough.append(item)
+            continue
+
+        prev = by_uuid.get(ident)
+        if prev is None or _entity_rank(item) >= _entity_rank(prev):
+            by_uuid[ident] = item
+
+    return list(by_uuid.values()) + passthrough
+
+
+def fetch_cilistfiltered_windowed(
+    entity_name: str,
+    *,
+    created_at_from: str,
+    created_at_to: str,
+    states: Optional[List[str]] = None,
+    window_target_count: int = 5000,
+    page_size: int = 1000,
+    probe_page_size: int = 1,
+    sleep_s: float = 0.1,
+    verbose: bool = True,
+    max_depth: int = 32,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    states = list(states or ["DRAFT", "INVALIDATED"])
+
+    start_dt = _parse_iso_dt(created_at_from)
+    end_dt = _parse_iso_dt(created_at_to)
+    if start_dt > end_dt:
+        raise ValueError("created_at_from must be <= created_at_to")
+
+    windows: List[Tuple[datetime, datetime, int]] = []
+    stack: List[Tuple[datetime, datetime, int]] = [(start_dt, end_dt, 0)]
+
+    while stack:
+        win_start, win_end, depth = stack.pop()
+        start_s = _fmt_iso_dt_millis(win_start)
+        end_s = _fmt_iso_dt_millis(win_end)
+        total, sample_items = probe_cilistfiltered_window(
+            entity_name,
+            created_at_from=start_s,
+            created_at_to=end_s,
+            states=states,
+            probe_page_size=probe_page_size,
+        )
+
+        if verbose:
+            print(
+                f"[{entity_name}] probe createdAt=[{start_s}, {end_s}] -> count={total!r} sample={len(sample_items)} depth={depth}",
+                flush=True,
+            )
+
+        span_ms = int((win_end - win_start).total_seconds() * 1000)
+        if total == 0:
+            continue
+
+        if (
+            total is None
+            or total < window_target_count
+            or depth >= max_depth
+            or span_ms <= 1
+        ):
+            windows.append((win_start, win_end, 0 if total is None else total))
+            continue
+
+        half_ms = span_ms // 2
+        split = win_start + timedelta(milliseconds=half_ms)
+        if split <= win_start:
+            split = win_start + timedelta(milliseconds=1)
+        if split >= win_end:
+            windows.append((win_start, win_end, total))
+            continue
+
+        stack.append((split, win_end, depth + 1))
+        stack.append((win_start, split, depth + 1))
+
+    windows.sort(key=lambda w: w[0])
+
+    all_items: List[Dict[str, Any]] = []
+    window_meta: List[Dict[str, Any]] = []
+    for win_start, win_end, probe_count in windows:
+        start_s = _fmt_iso_dt_millis(win_start)
+        end_s = _fmt_iso_dt_millis(win_end)
+        items, total_pages = fetch_cilistfiltered_pages(
+            entity_name,
+            created_at_from=start_s,
+            created_at_to=end_s,
+            states=states,
+            page_size=page_size,
+            sleep_s=sleep_s,
+            verbose=verbose,
+        )
+        all_items.extend(items)
+        window_meta.append(
+            {
+                "createdAtFrom": start_s,
+                "createdAtTo": end_s,
+                "probeCount": probe_count,
+                "fetchedCount": len(items),
+                "totalPages": total_pages,
+            }
+        )
+
+    deduped = _dedupe_entities_keep_latest(all_items)
+    if verbose and len(deduped) != len(all_items):
+        print(
+            f"[{entity_name}] deduped fetched entities: raw={len(all_items)} unique={len(deduped)}",
+            flush=True,
+        )
+
+    return deduped, window_meta
 
 
 # ----------------------------

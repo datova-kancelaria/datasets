@@ -1,4 +1,4 @@
-name: Fetch MetaIS reports
+name: Fetch datasets
 
 on:
   schedule:
@@ -14,8 +14,6 @@ jobs:
     runs-on: [self-hosted, linux, x64, finance-vm]
     permissions:
       contents: read
-    env:
-      API_URI: ${{ secrets.API_URI }}
 
     steps:
       - name: Check out repository
@@ -30,26 +28,53 @@ jobs:
           set -euo pipefail
           source /opt/datasets/runner-env.sh
 
-          : "${PYTHON_BIN:?Missing PYTHON_BIN}"
-          : "${CES_ORG_NAME:?Missing CES_ORG_NAME}"
-          : "${CES_SECRETS_DIR:?Missing CES_SECRETS_DIR}"
+          if [[ -z "${PYTHON_BIN:-}" ]]; then
+            PYTHON_BIN=python3
+          fi
+          command -v "$PYTHON_BIN" >/dev/null 2>&1
 
-          test -x "$PYTHON_BIN"
-          sudo test -d "$CES_SECRETS_DIR"
-          sudo test -f "$CES_SECRETS_DIR/APIKEY"
-          sudo test -f "$CES_SECRETS_DIR/USER"
-          sudo test -f "$CES_SECRETS_DIR/PASS"
+          if [[ -z "${DATA_ROOT:-}" ]]; then
+            DATA_ROOT="$GITHUB_WORKSPACE/data"
+          fi
+          if [[ ${EGOV_OUT_DIR+x} != x ]]; then
+            EGOV_OUT_DIR="$DATA_ROOT/egov"
+          fi
+          if [[ ${LOCATION_OUT_DIR+x} != x ]]; then
+            LOCATION_OUT_DIR="$DATA_ROOT/location"
+          fi
+          if [[ ${FINANCE_OUT_DIR+x} != x ]]; then
+            FINANCE_OUT_DIR="$DATA_ROOT/finance-mirri"
+          fi
+          if [[ -z "${LOCATION_DATA_DAYS_REFRESH:-}" ]]; then
+            LOCATION_DATA_DAYS_REFRESH=30
+          fi
+          if [[ -z "${CES_CONFIG:-}" ]]; then
+            CES_CONFIG="$GITHUB_WORKSPACE/ces-harvest/config/datasets.json"
+          fi
+
+          mkdir -p "$DATA_ROOT"
+
+          if [[ -n "$FINANCE_OUT_DIR" ]]; then
+            : "${CES_ORG_NAME:?Missing CES_ORG_NAME (required when FINANCE_OUT_DIR is enabled)}"
+            : "${CES_SECRETS_DIR:?Missing CES_SECRETS_DIR (required when FINANCE_OUT_DIR is enabled)}"
+
+            sudo test -d "$CES_SECRETS_DIR"
+            sudo test -f "$CES_SECRETS_DIR/APIKEY"
+            sudo test -f "$CES_SECRETS_DIR/USER"
+            sudo test -f "$CES_SECRETS_DIR/PASS"
+            test -f "$CES_CONFIG"
+          fi
 
           {
             echo "PYTHON_BIN=$PYTHON_BIN"
-            echo "CES_ORG_NAME=$CES_ORG_NAME"
-            echo "CES_SECRETS_DIR=$CES_SECRETS_DIR"
             echo "DATA_ROOT=$DATA_ROOT"
             echo "EGOV_OUT_DIR=$EGOV_OUT_DIR"
             echo "LOCATION_OUT_DIR=$LOCATION_OUT_DIR"
             echo "FINANCE_OUT_DIR=$FINANCE_OUT_DIR"
-            echo "CES_CONFIG=$CES_CONFIG"
             echo "LOCATION_DATA_DAYS_REFRESH=$LOCATION_DATA_DAYS_REFRESH"
+            echo "CES_CONFIG=$CES_CONFIG"
+            [[ -n "${CES_ORG_NAME:-}" ]] && echo "CES_ORG_NAME=$CES_ORG_NAME"
+            [[ -n "${CES_SECRETS_DIR:-}" ]] && echo "CES_SECRETS_DIR=$CES_SECRETS_DIR"
             [[ -n "${CURL_RETRIES:-}" ]] && echo "CURL_RETRIES=$CURL_RETRIES"
             [[ -n "${CURL_RETRY_DELAY:-}" ]] && echo "CURL_RETRY_DELAY=$CURL_RETRY_DELAY"
             [[ -n "${CURL_CONNECT_TIMEOUT:-}" ]] && echo "CURL_CONNECT_TIMEOUT=$CURL_CONNECT_TIMEOUT"
@@ -70,7 +95,10 @@ jobs:
           ./scripts/build-data.sh
 
       - name: Generate directory index pages
-        run: python3 make_index.py "${{ steps.runner_env.outputs.data_root }}"
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$PYTHON_BIN" make_index.py "${{ steps.runner_env.outputs.data_root }}"
 
       - name: Upload data artifact
         uses: actions/upload-artifact@v4
