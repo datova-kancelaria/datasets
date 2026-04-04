@@ -4,13 +4,20 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_PATH="${CES_CONFIG:-$SCRIPT_DIR/config/datasets.json}"
 
-PYTHON_BIN="${PYTHON_BIN:?Set PYTHON_BIN}"
+if [[ -z "${PYTHON_BIN:-}" ]]; then
+  PYTHON_BIN=python3
+fi
 RUN_USER="${CES_RUN_USER:-$(id -un)}"
 ORG_NAME="${CES_ORG_NAME:?Set CES_ORG_NAME}"
 SECRETS_DIR="${CES_SECRETS_DIR:?Set CES_SECRETS_DIR}"
 while [[ "$SECRETS_DIR" == */ ]]; do
   SECRETS_DIR="${SECRETS_DIR%/}"
 done
+
+if [[ ! -f "$CONFIG_PATH" ]]; then
+  echo "CES config not found: $CONFIG_PATH" >&2
+  exit 2
+fi
 
 cmd=(
   "$PYTHON_BIN"
@@ -22,7 +29,7 @@ cmd=(
 
 if [[ "${1:-}" == "--print-cmd" ]]; then
   shift
-  printf '%q ' "$PYTHON_BIN" -m harvest --config "$CONFIG_PATH" "$@"
+  printf '%q ' "$PYTHON_BIN" -m harvest --config "$CONFIG_PATH" --org-name "$ORG_NAME" "$@"
   echo
   exit 0
 fi

@@ -5,43 +5,55 @@
 #
 # This file is meant to be sourced:
 #   source /opt/datasets/runner-env.sh
+#
+# Empty output-dir strings disable whole modules.
+# No GitHub repository secrets are required by this pipeline.
+# The CES module still needs local credential files when enabled.
 
-# Python interpreter used by the pipeline
+# Python interpreter used by the pipeline.
+# Leave empty to fall back to `python3` on PATH.
 export PYTHON_BIN=/absolute/path/to/venv/bin/python
 
-# Directory containing CES credential files:
+# Persistent output/cache location.
+# Leave empty to use the repository default (`<repo>/data` when run locally,
+# `$GITHUB_WORKSPACE/data` in GitHub Actions).
+export DATA_ROOT=/absolute/path/to/persistent/data
+
+# Output subdirectories. Leave empty to disable a module.
+export EGOV_OUT_DIR=""
+export LOCATION_OUT_DIR=""
+export FINANCE_OUT_DIR="$DATA_ROOT/finance-<your-org>"
+
+# Refresh threshold (days) for location/NUTS data.
+export LOCATION_DATA_DAYS_REFRESH=30
+
+# CES harvest config file.
+# Leave empty to use the repository default:
+#   <repo>/ces-harvest/config/datasets.json
+export CES_CONFIG=
+
+# Directory containing CES credential files.
+# Required only when FINANCE_OUT_DIR is non-empty.
+# Expected files:
 #   APIKEY
 #   USER
 #   PASS
 export CES_SECRETS_DIR=/absolute/path/to/ces-secrets
 
-# Stable organization name used by the CES pipeline
+# Stable organization name used by the CES pipeline.
+# Required only when FINANCE_OUT_DIR is non-empty.
 export CES_ORG_NAME='your organization name here'
 
-# Repository checkout root on the self-hosted runner
-export REPO_ROOT=/absolute/path/to/repo
+# Optional override for the Unix user that runs CES through systemd-run.
+# export CES_RUN_USER="$USER"
 
-# Persistent output/cache location
-export DATA_ROOT="$REPO_ROOT/data"
-
-# Output subdirectories
-export EGOV_OUT_DIR="$DATA_ROOT/egov"
-export LOCATION_OUT_DIR="$DATA_ROOT/location"
-export FINANCE_OUT_DIR="$DATA_ROOT/finance-mirri"
-
-# Refresh threshold (days) for location/NUTS data
-export LOCATION_DATA_DAYS_REFRESH=30
-
-# CES harvest config file inside the repo
-export CES_CONFIG="$REPO_ROOT/ces-harvest/config/datasets.json"
-
-# Network retry/timeout tuning for curl-based fetches
+# Optional network retry/timeout tuning for curl-based eGov report fetches.
 export CURL_RETRIES=5
 export CURL_RETRY_DELAY=2
 export CURL_CONNECT_TIMEOUT=15
 export CURL_MAX_TIME=180
 
-# Optional proxy configuration
+# Optional proxy configuration.
 # Uncomment and fill in if your environment requires an HTTP/HTTPS proxy.
 # export http_proxy=http://proxy-host:3128
 # export https_proxy=http://proxy-host:3128
