@@ -12,9 +12,8 @@ from .models import AppSettings
 MAX_POLLS = 240
 POLL_SLEEP_SEC = 2.0
 
-WAIT_STATUSES = {"new", "processing", "queued", "running", ""}
-DONE_STATUSES = {"done", "finished", "complete"}
-FAIL_STATUSES = {"error", "failed", "rejected"}
+WAIT_STATUS = "processing"
+DONE_STATUS = "done"
 
 
 def b64_json(obj: dict[str, Any]) -> str:
@@ -104,23 +103,22 @@ def poll_od002_until_done(
         err = j.get("errorMessage")
         print("status:", status, "| err:", err)
 
-        if status in WAIT_STATUSES:
+        if status == WAIT_STATUS:
             time.sleep(POLL_SLEEP_SEC)
             continue
-        if status in FAIL_STATUSES:
-            raise RuntimeError(f"OD_002 job failed: {json.dumps(j, ensure_ascii=False)[:2000]}")
-        if status in DONE_STATUSES:
+        if status == DONE_STATUS:
             return j
 
-        print("Unknown status JSON (first 1200 chars):")
-        print(json.dumps(j, ensure_ascii=False)[:1200])
-        time.sleep(POLL_SLEEP_SEC)
+        raise RuntimeError(f"OD_002 returned unexpected status: {json.dumps(j, ensure_ascii=False)[:2000]}")
 
     raise TimeoutError("Timed out waiting for OD_002 to finish")
 
 
 def decode_payload_from_od002(j: dict[str, Any]) -> bytes:
-    payload_b64 = j.get("payload") or j.get("documentPayload")
-    if not payload_b64:
-        raise RuntimeError(f"DONE but no payload/documentPayload. responsePath={j.get('responsePath')}")
-    return base64.b64decode(payload_b64)
+    payload_b64 = j.get("payload")
+    if not isinstance(payload_b64, str) or not payload_b64:
+        raise RuntimeError(f"DONE but no payload. responsePath={j.get('responsePath')}")
+    try:
+        return base64.b64decode(payload_b64, validate=True)
+    except Exception as exc:
+        raise RuntimeError("DONE response payload is not valid Base64") from exc

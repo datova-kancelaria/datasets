@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import requests
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
