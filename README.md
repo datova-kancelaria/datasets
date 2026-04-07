@@ -30,7 +30,7 @@ Behavior:
 This skip-by-empty-dir behavior is implemented in both:
 
 - `scripts/build-data.sh`
-- `.github/workflows/metais-reports.yml`
+- `.github/workflows/datasets.yml`
 
 So, for example, if `FINANCE_OUT_DIR=""`, the CES module is skipped and the workflow does not require or validate `CES_ORG_NAME`, `CES_SECRETS_DIR`, or CES credential files.
 
@@ -45,13 +45,14 @@ The `ces-harvest` module still requires local credential files when enabled:
 - `APIKEY`
 - `USER`
 - `PASS`
+- `URI`
 
 These are provided from a machine-local directory via `CES_SECRETS_DIR` and passed into `systemd-run` by `ces-harvest/run.sh`.
 
 ## Repository layout
 
 - `scripts/build-data.sh` — top-level orchestrator run by GitHub Actions and suitable for local runs
-- `.github/workflows/metais-reports.yml` — self-hosted runner workflow
+- `.github/workflows/datasets.yml` — self-hosted runner workflow
 - `runner-env.example.sh` — example machine-local environment file
 - `make_index.py` — builds directory index pages for the harvested output tree
 - `egov/` — MetaIS public report and CMDB cloud-service pipeline
@@ -118,8 +119,21 @@ Expected files inside `CES_SECRETS_DIR`:
 - `APIKEY`
 - `USER`
 - `PASS`
+- `URI`
 
-These are given by MFSR upon request. Do not forget to request your machine's egress IP to be whitelisted.
+`APIKEY`, `USER`, and `PASS` belong to your technical account and are provided by MFSR upon request. Do not forget to request whitelisting of your machine's egress IP.
+
+`URI` is a machine-local JSON file that defines the concrete OD endpoint URLs used by the harvester, for example:
+
+```json
+{
+  "od001": "https://.../API_OD_001",
+  "od002": "https://.../API_OD_002",
+  "od003": "https://.../API_OD_003"
+}
+```
+
+The individual API endpoints are also provided by MFSR along with the technical account credentials.
 
 ### 5. Run the pipeline locally
 

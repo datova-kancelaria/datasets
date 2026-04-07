@@ -22,6 +22,7 @@ It supports:
 - `config/datasets.json` — dataset scheduling and output config
 - `harvest/__main__.py` — CLI entrypoint
 - `harvest/ces_api.py` — OD_001 / OD_002 / OD_003 HTTP calls
+- `harvest/settings.py` — loads credentials and endpoint URLs from systemd credentials
 - `harvest/planner.py` — expands schedules into concrete jobs
 - `harvest/runner.py` — executes jobs, writes chunks, merges and postprocesses
 - `harvest/mergers.py` — CSV and RDF/XML merge logic
@@ -39,6 +40,7 @@ Required when CES is enabled:
   - `APIKEY`
   - `USER`
   - `PASS`
+  - `URI`
 
 Optional:
 
@@ -48,6 +50,22 @@ Optional:
 - `PYTHON_BIN` — defaults to `python3` if unset
 
 At runtime the Python package itself expects `CREDENTIALS_DIRECTORY`, which is supplied automatically by `systemd-run -p LoadCredential=...` in `run.sh`.
+
+## Runner-local endpoint file
+
+The CES endpoint URLs are not hardcoded in the Python package.
+
+They are loaded at runtime from `CREDENTIALS_DIRECTORY/URI`, where `URI` is a machine-local JSON file populated from the endpoint information provided by MFSR. The file should have the following structure:
+
+```json
+{
+  "od001": "https://.../API_OD_001",
+  "od002": "https://.../API_OD_002",
+  "od003": "https://.../API_OD_003"
+}
+```
+
+`run.sh` passes this file into the service as the `URI` systemd credential.
 
 ## Wrapper usage
 
@@ -124,9 +142,9 @@ Merge strategies implemented by the runner:
 
 1. load config JSON
 2. resolve output directory
-3. load CES credentials from `CREDENTIALS_DIRECTORY`
+3. load CES credentials and endpoint URLs from `CREDENTIALS_DIRECTORY`
 4. fetch OD_003 organizations
-5. choose organization by `--hierarchy-node-code`, `--org-name`, env, or cached code
+5. choose organization by `--hierarchy-node-code`, `--org-name`, `CES_ORG_NAME`, or cached code
 6. build concrete harvest jobs from schedules
 7. for each job:
    - skip if metadata already matches and the main output exists
@@ -144,7 +162,7 @@ Merge strategies implemented by the runner:
    - poll `OD_002/<requestId>` until the export is ready
      - while the job is still being processed, OD_002 returns `status: "processing"`
      - when the export is ready, OD_002 returns `status: "done"`
-     - in the `done` response, the exported dataset is carried in the same OD_002 response under `payload`
+     - in the `done` response, the exported dataset is returned in the same `OD_002` response under `payload`
      - `payload` is a Base64-encoded string containing the raw output file bytes (for example CSV or XML, depending on the requested format)
      - the runner decodes that Base64 string and writes the resulting bytes to the chunk file
    - write chunk payloads
