@@ -14,8 +14,8 @@ while [[ "$SECRETS_DIR" == */ ]]; do
   SECRETS_DIR="${SECRETS_DIR%/}"
 done
 for name in APIKEY USER PASS URI; do
-  if [[ ! -f "$SECRETS_DIR/$name" ]]; then
-    echo "Missing CES secret file: $SECRETS_DIR/$name" >&2
+  if ! sudo test -f "$SECRETS_DIR/$name"; then
+    echo "Missing CES secret file or not accessible via sudo: $SECRETS_DIR/$name" >&2
     exit 2
   fi
 done
