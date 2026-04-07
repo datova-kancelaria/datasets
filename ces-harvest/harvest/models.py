@@ -28,19 +28,9 @@ class Credentials:
 
 @dataclass(frozen=True)
 class AppSettings:
-    host: str = "__REMOVED_CES_BASE_URL__"
-
-    @property
-    def od001(self) -> str:
-        return f"{self.host}/API_OD_001"
-
-    @property
-    def od002(self) -> str:
-        return f"{self.host}/API_OD_002"
-
-    @property
-    def od003(self) -> str:
-        return f"{self.host}/API_OD_003"
+    od001: str
+    od002: str
+    od003: str
 
 
 @dataclass(frozen=True)

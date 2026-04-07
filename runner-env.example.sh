@@ -38,7 +38,14 @@ export CES_CONFIG=
 #   APIKEY
 #   USER
 #   PASS
+#   URI
 export CES_SECRETS_DIR=/absolute/path/to/ces-secrets
+# Example content of $CES_SECRETS_DIR/URI:
+# {
+#   "od001": "https://.../API_OD_001",
+#   "od002": "https://.../API_OD_002",
+#   "od003": "https://.../API_OD_003"
+# }
 
 # Stable organization name used by the CES pipeline.
 # Required only when FINANCE_OUT_DIR is non-empty.

@@ -13,6 +13,13 @@ SECRETS_DIR="${CES_SECRETS_DIR:?Set CES_SECRETS_DIR}"
 while [[ "$SECRETS_DIR" == */ ]]; do
   SECRETS_DIR="${SECRETS_DIR%/}"
 done
+for name in APIKEY USER PASS URI; do
+  if [[ ! -f "$SECRETS_DIR/$name" ]]; then
+    echo "Missing CES secret file: $SECRETS_DIR/$name" >&2
+    exit 2
+  fi
+done
+
 
 if [[ ! -f "$CONFIG_PATH" ]]; then
   echo "CES config not found: $CONFIG_PATH" >&2
@@ -50,4 +57,5 @@ sudo --preserve-env=http_proxy,https_proxy,HTTP_PROXY,HTTPS_PROXY,NO_PROXY,CES_C
   -p LoadCredential=APIKEY:"$SECRETS_DIR/APIKEY" \
   -p LoadCredential=USER:"$SECRETS_DIR/USER" \
   -p LoadCredential=PASS:"$SECRETS_DIR/PASS" \
+  -p LoadCredential=URI:"$SECRETS_DIR/URI" \
   "${cmd[@]}"

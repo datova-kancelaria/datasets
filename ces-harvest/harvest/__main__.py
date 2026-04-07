@@ -12,7 +12,7 @@ from .dataset_config import load_config
 from .orgs import choose_hierarchy_node_code, print_orgs
 from .planner import build_jobs
 from .runner import postprocess_result, run_job
-from .settings import build_session, common_headers, default_settings, load_credentials
+from .settings import build_session, common_headers, load_app_settings, load_credentials
 
 
 def parse_args() -> argparse.Namespace:
@@ -51,7 +51,7 @@ def main() -> int:
 
     creds = load_credentials()
     session = build_session(creds)
-    settings = default_settings()
+    settings = load_app_settings()
 
     headers = common_headers(creds)
     items = fetch_od003_items(session, headers, settings)
