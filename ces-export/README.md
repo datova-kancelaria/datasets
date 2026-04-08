@@ -1,10 +1,10 @@
-# ces-harvest
+# ces-export
 
-Harvests datasets from CES open-data endpoints and writes them to a filesystem tree according to a JSON schedule config.
+Fetches datasets from CES open-data endpoints and writes them to a filesystem tree according to a JSON schedule config.
 
 ## What it does
 
-`ces-harvest` talks to the CES OD_001 / OD_002 / OD_003 endpoints, chooses an organization, plans dataset/date windows from `config/datasets.json`, downloads the payloads, and then optionally merges or postprocesses them.
+`ces-export` talks to the CES OD_001 / OD_002 / OD_003 endpoints, chooses an organization, plans dataset/date windows from `config/datasets.json`, downloads the payloads, and then optionally merges or postprocesses them.
 
 It supports:
 
@@ -19,14 +19,14 @@ It supports:
 ## Files and directories
 
 - `run.sh` — wrapper that launches the Python package under `systemd-run` with `LoadCredential=`
-- `config/datasets.json` — dataset scheduling and output config
-- `harvest/__main__.py` — CLI entrypoint
-- `harvest/ces_api.py` — OD_001 / OD_002 / OD_003 HTTP calls
-- `harvest/settings.py` — loads credentials and endpoint URLs from systemd credentials
-- `harvest/planner.py` — expands schedules into concrete jobs
-- `harvest/runner.py` — executes jobs, writes chunks, merges and postprocesses
-- `harvest/mergers.py` — CSV and RDF/XML merge logic
-- `harvest/postprocess.py` — extra output conversions
+- `config/datasets.json` — dataset scheduling and format/chunking config
+- `ces_export/__main__.py` — CLI entrypoint
+- `ces_export/ces_api.py` — OD_001 / OD_002 / OD_003 HTTP calls
+- `ces_export/settings.py` — loads credentials and endpoint URLs from systemd credentials
+- `ces_export/planner.py` — expands schedules into concrete jobs
+- `ces_export/runner.py` — executes jobs, writes chunks, merges and postprocesses
+- `ces_export/mergers.py` — CSV and RDF/XML merge logic
+- `ces_export/postprocess.py` — extra output conversions
 
 ## Runtime requirements
 
@@ -36,6 +36,7 @@ Required when CES is enabled:
 
 - `CES_ORG_NAME`
 - `CES_SECRETS_DIR`
+- `CES_EXPORT_OUT_DIR` (or pass `--out-dir` to the wrapper / CLI)
 - credential files inside `CES_SECRETS_DIR`:
   - `APIKEY`
   - `USER`
@@ -44,7 +45,7 @@ Required when CES is enabled:
 
 Optional:
 
-- `CES_CONFIG` — alternate config path. Default: `ces-harvest/config/datasets.json`
+- `CES_CONFIG` — alternate config path. Default: `ces-export/config/datasets.json`
 - `CES_RUN_USER` — Unix user for `systemd-run`
 - `http_proxy`, `https_proxy`, `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`
 - `PYTHON_BIN` — defaults to `python3` if unset
@@ -69,16 +70,23 @@ They are loaded at runtime from `CREDENTIALS_DIRECTORY/URI`, where `URI` is a ma
 
 ## Wrapper usage
 
+Typical env-driven invocation:
+
+```bash
+source /opt/datasets/runner-env.sh
+./ces-export/run.sh
+```
+
 Typical repo-level invocation:
 
 ```bash
-./ces-harvest/run.sh --out-dir /path/to/output
+./ces-export/run.sh --out-dir /path/to/output
 ```
 
 Show the command that would be run:
 
 ```bash
-./ces-harvest/run.sh --print-cmd --out-dir /path/to/output
+./ces-export/run.sh --print-cmd --out-dir /path/to/output
 ```
 
 The wrapper always passes:
@@ -89,7 +97,7 @@ The wrapper always passes:
 
 ## Python CLI arguments
 
-From `python -m harvest`:
+From `python -m ces_export`:
 
 - `--config PATH` — required config JSON
 - `--hierarchy-node-code CODE` — exact OD_003 code
@@ -98,7 +106,7 @@ From `python -m harvest`:
 - `--list-orgs-filter TEXT` — filter for `--list-orgs`
 - `--no-cache-org` — do not read/write `.hierarchy_node_code.txt`
 - `--today YYYY-MM-DD` — override current date for testing
-- `--out-dir PATH` — override `defaults.out_dir` from config
+- `--out-dir PATH` — sets the output dir
 - `--dry-run` — print planned work only
 - `--force` — ignore matching metadata and refetch
 - `--start-year N`, `--end-year N` — override schedule year bounds
@@ -111,7 +119,6 @@ See `config/datasets.json`.
 
 Important parts:
 
-- `defaults.out_dir` — base output directory
 - `defaults.formats.<fmt>` — default per-format behavior
 - `datasets.<name>.schedules[]` — one or more schedules per dataset
 - `datasets.<name>.formats.<fmt>` — dataset-specific format overrides
@@ -141,11 +148,11 @@ Merge strategies implemented by the runner:
 ## Execution flow
 
 1. load config JSON
-2. resolve output directory
+2. resolve output directory from `--out-dir` or `CES_EXPORT_OUT_DIR`
 3. load CES credentials and endpoint URLs from `CREDENTIALS_DIRECTORY`
 4. fetch OD_003 organizations
 5. choose organization by `--hierarchy-node-code`, `--org-name`, `CES_ORG_NAME`, or cached code
-6. build concrete harvest jobs from schedules
+6. build concrete export jobs from schedules
 7. for each job:
    - skip if metadata already matches and the main output exists
    - split date ranges into chunks according to `window`
@@ -182,7 +189,7 @@ The runner does not pretend every dataset produces one merged file. `RunResult` 
 
 ## XML merge note
 
-For RDF/XML merges, the runner first attempts a normal graph parse/merge. If that fails, it retries after applying `harvest/rdfxml_repair.py` to the chunks. The manifest records whether the merge succeeded immediately, succeeded after repair, or failed after the retry.
+For RDF/XML merges, the runner first attempts a normal graph parse/merge. If that fails, it retries after applying `ces_export/rdfxml_repair.py` to the chunks. The manifest records whether the merge succeeded immediately, succeeded after repair, or failed after the retry.
 
 ## CES endpoint details
 

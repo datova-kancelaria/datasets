@@ -43,11 +43,17 @@ def main() -> int:
 
     config = load_config(args.config)
 
-    out_dir_override = args.out_dir or (Path(os.environ["CES_OUT_DIR"]) if os.environ.get("CES_OUT_DIR") else None)
-    if out_dir_override is not None:
-        config = replace(config, defaults=replace(config.defaults, out_dir=out_dir_override))
+    out_dir_override = args.out_dir or (
+        Path(os.environ["CES_EXPORT_OUT_DIR"])
+        if os.environ.get("CES_EXPORT_OUT_DIR")
+        else None
+    )
 
-    config.defaults.out_dir.mkdir(parents=True, exist_ok=True)
+    resolved_out_dir = out_dir_override or config.defaults.out_dir
+    if resolved_out_dir is None:
+        raise SystemExit("No output directory configured. Set CES_EXPORT_OUT_DIR or pass --out-dir.")
+
+    config = replace(config, defaults=replace(config.defaults, out_dir=resolved_out_dir))
 
     creds = load_credentials()
     session = build_session(creds)

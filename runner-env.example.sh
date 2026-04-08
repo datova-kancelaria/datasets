@@ -22,18 +22,18 @@ export DATA_ROOT=/absolute/path/to/persistent/data
 # Output subdirectories. Leave empty to disable a module.
 export EGOV_OUT_DIR=""
 export LOCATION_OUT_DIR=""
-export FINANCE_OUT_DIR="$DATA_ROOT/finance-<your-org>"
+export CES_EXPORT_OUT_DIR="$DATA_ROOT/finance-<your-org>"
 
 # Refresh threshold (days) for location/NUTS data.
 export LOCATION_DATA_DAYS_REFRESH=30
 
-# CES harvest config file.
+# CES fetcher config file.
 # Leave empty to use the repository default:
-#   <repo>/ces-harvest/config/datasets.json
-export CES_CONFIG=
+#   <repo>/ces-export/config/datasets.json
+#export CES_CONFIG=/path/to/custom/config/file
 
 # Directory containing CES credential files.
-# Required only when FINANCE_OUT_DIR is non-empty.
+# Required only when CES_EXPORT_OUT_DIR is non-empty.
 # Expected files:
 #   APIKEY
 #   USER
@@ -48,7 +48,7 @@ export CES_SECRETS_DIR=/absolute/path/to/ces-secrets
 # }
 
 # Stable organization name used by the CES pipeline.
-# Required only when FINANCE_OUT_DIR is non-empty.
+# Required only when CES_EXPORT_OUT_DIR is non-empty.
 export CES_ORG_NAME='your organization name here'
 
 # Optional override for the Unix user that runs CES through systemd-run.

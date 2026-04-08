@@ -28,7 +28,7 @@ fi
 
 cmd=(
   "$PYTHON_BIN"
-  -m harvest
+  -m ces_export
   --config "$CONFIG_PATH"
   --org-name "$ORG_NAME"
   "$@"
@@ -36,12 +36,12 @@ cmd=(
 
 if [[ "${1:-}" == "--print-cmd" ]]; then
   shift
-  printf '%q ' "$PYTHON_BIN" -m harvest --config "$CONFIG_PATH" --org-name "$ORG_NAME" "$@"
+  printf '%q ' "$PYTHON_BIN" -m ces_export --config "$CONFIG_PATH" --org-name "$ORG_NAME" "$@"
   echo
   exit 0
 fi
 
-unit="ces-harvest-$(date +%s)"
+unit="ces-export-$(date +%s)"
 
 sudo --preserve-env=http_proxy,https_proxy,HTTP_PROXY,HTTPS_PROXY,NO_PROXY,CES_CONFIG \
   systemd-run --collect --unit="$unit" --wait --pipe \

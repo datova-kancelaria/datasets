@@ -69,7 +69,6 @@ def load_config(path: Path) -> AppConfig:
     }
 
     defaults = DefaultsSpec(
-        out_dir=Path(defaults_raw.get("out_dir", "ces_out")),
         formats=default_formats,
         schedule=ScheduleDefaultsSpec(
             touch_mtime_to_range_end=bool(

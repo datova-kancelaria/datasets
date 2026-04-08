@@ -37,26 +37,26 @@ jobs:
             DATA_ROOT="$GITHUB_WORKSPACE/data"
           fi
           if [[ ${EGOV_OUT_DIR+x} != x ]]; then
-            EGOV_OUT_DIR="$DATA_ROOT/egov"
+            EGOV_OUT_DIR=""
           fi
           if [[ ${LOCATION_OUT_DIR+x} != x ]]; then
-            LOCATION_OUT_DIR="$DATA_ROOT/location"
+            LOCATION_OUT_DIR=""
           fi
-          if [[ ${FINANCE_OUT_DIR+x} != x ]]; then
-            FINANCE_OUT_DIR="$DATA_ROOT/finance-mirri"
+          if [[ ${CES_EXPORT_OUT_DIR+x} != x ]]; then
+            CES_EXPORT_OUT_DIR=""
           fi
           if [[ -z "${LOCATION_DATA_DAYS_REFRESH:-}" ]]; then
             LOCATION_DATA_DAYS_REFRESH=30
           fi
           if [[ -z "${CES_CONFIG:-}" ]]; then
-            CES_CONFIG="$GITHUB_WORKSPACE/ces-harvest/config/datasets.json"
+            CES_CONFIG="$GITHUB_WORKSPACE/ces-export/config/datasets.json"
           fi
 
           mkdir -p "$DATA_ROOT"
 
-          if [[ -n "$FINANCE_OUT_DIR" ]]; then
-            : "${CES_ORG_NAME:?Missing CES_ORG_NAME (required when FINANCE_OUT_DIR is enabled)}"
-            : "${CES_SECRETS_DIR:?Missing CES_SECRETS_DIR (required when FINANCE_OUT_DIR is enabled)}"
+          if [[ -n "$CES_EXPORT_OUT_DIR" ]]; then
+            : "${CES_ORG_NAME:?Missing CES_ORG_NAME (required when CES_EXPORT_OUT_DIR is enabled)}"
+            : "${CES_SECRETS_DIR:?Missing CES_SECRETS_DIR (required when CES_EXPORT_OUT_DIR is enabled)}"
 
             sudo test -d "$CES_SECRETS_DIR"
             sudo test -f "$CES_SECRETS_DIR/APIKEY"
@@ -71,7 +71,7 @@ jobs:
             echo "DATA_ROOT=$DATA_ROOT"
             echo "EGOV_OUT_DIR=$EGOV_OUT_DIR"
             echo "LOCATION_OUT_DIR=$LOCATION_OUT_DIR"
-            echo "FINANCE_OUT_DIR=$FINANCE_OUT_DIR"
+            echo "CES_EXPORT_OUT_DIR=$CES_EXPORT_OUT_DIR"
             echo "LOCATION_DATA_DAYS_REFRESH=$LOCATION_DATA_DAYS_REFRESH"
             echo "CES_CONFIG=$CES_CONFIG"
             [[ -n "${CES_ORG_NAME:-}" ]] && echo "CES_ORG_NAME=$CES_ORG_NAME"

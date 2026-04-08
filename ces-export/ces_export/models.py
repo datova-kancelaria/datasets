@@ -78,8 +78,8 @@ class DatasetSpec:
 
 @dataclass(frozen=True)
 class DefaultsSpec:
-    out_dir: Path
-    formats: dict[str, FormatSpec]
+    out_dir: Path | None = None
+    formats: dict[str, FormatSpec] = field(default_factory=dict)
     schedule: ScheduleDefaultsSpec = field(default_factory=ScheduleDefaultsSpec)
 
 
@@ -90,7 +90,7 @@ class AppConfig:
 
 
 @dataclass(frozen=True)
-class HarvestJob:
+class ExportJob:
     dataset: str
     fmt: str
     d_from: date

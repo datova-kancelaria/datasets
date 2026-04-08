@@ -11,11 +11,11 @@ from .ces_api import create_od001_request, decode_payload_from_od002, poll_od002
 from .date_rules import split_range
 from .io_utils import atomic_write_bytes, load_meta, meta_matches, write_meta
 from .mergers import RDFXMLMergeError, merge_csv_chunks, merge_rdfxml_chunks, write_chunk_manifest
-from .models import AppSettings, HarvestJob, RunResult
+from .models import AppSettings, ExportJob, RunResult
 
 
 
-def want_meta(job: HarvestJob, hierarchy_node_code: str) -> dict[str, object]:
+def want_meta(job: ExportJob, hierarchy_node_code: str) -> dict[str, object]:
     return {
         "datasetName": job.dataset,
         "hierarchyNodeCode": hierarchy_node_code,
@@ -31,11 +31,11 @@ def _chunk_filename(fmt: str, d_from: date, d_to: date) -> str:
     return f"{d_from.isoformat()}_{d_to.isoformat()}.{fmt}"
 
 
-def _chunk_dir(job: HarvestJob) -> Path:
+def _chunk_dir(job: ExportJob) -> Path:
     return job.out_path.parent / f"{job.out_path.name}.chunks"
 
 
-def _chunk_path(job: HarvestJob, d_from: date, d_to: date) -> Path:
+def _chunk_path(job: ExportJob, d_from: date, d_to: date) -> Path:
     return _chunk_dir(job) / _chunk_filename(job.fmt, d_from, d_to)
 
 
@@ -50,7 +50,7 @@ def run_job(
     s: requests.Session,
     common_headers: dict[str, str],
     settings: AppSettings,
-    job: HarvestJob,
+    job: ExportJob,
     hierarchy_node_code: str,
     *,
     dry_run: bool,
@@ -311,7 +311,7 @@ def run_job(
     )
 
 
-def postprocess_result(result: RunResult, job: HarvestJob) -> None:
+def postprocess_result(result: RunResult, job: ExportJob) -> None:
     if not result.main_output or not result.main_output.exists():
         return
 

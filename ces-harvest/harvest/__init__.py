@@ -1,1 +1,0 @@
-"""CES harvest pipeline."""

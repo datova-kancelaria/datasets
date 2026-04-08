@@ -4,7 +4,7 @@ from datetime import date
 from pathlib import Path
 
 from .date_rules import halfyear_start, last_day_prev_month, previous_quarter_range
-from .models import AppConfig, HarvestJob, PlannedRange, ScheduleSpec
+from .models import AppConfig, ExportJob, PlannedRange, ScheduleSpec
 
 
 def render_out_dir(base_out_dir: Path, template: str, context: dict[str, object]) -> Path:
@@ -114,8 +114,8 @@ def build_jobs(
     end_year_override: int | None = None,
     include_datasets: set[str] | None = None,
     exclude_datasets: set[str] | None = None,
-) -> list[HarvestJob]:
-    jobs: list[HarvestJob] = []
+) -> list[ExportJob]:
+    jobs: list[ExportJob] = []
     include_datasets = include_datasets or set()
     exclude_datasets = exclude_datasets or set()
 
@@ -158,7 +158,7 @@ def build_jobs(
                     )
 
                     jobs.append(
-                        HarvestJob(
+                        ExportJob(
                             dataset=dataset_name,
                             fmt=fmt,
                             d_from=pr.d_from,

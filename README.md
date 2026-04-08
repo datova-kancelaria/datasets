@@ -1,17 +1,17 @@
 # datasets
 
-Public-data harvesting pipeline for three modules:
+Public data-fetching pipeline for three modules:
 
 - `egov/` — MetaIS public report exports plus cloud service extraction from public CMDB endpoints
 - `nuts/` — location / address datasets from `rageo.minv.sk`
-- `ces-harvest/` — CES open-data harvesting that requires local CES credential files when enabled
+- `ces-export/` — CES open-data fetcher that requires local CES credential files when enabled
 
 The repository is designed to run either:
 
 - locally from a clone, or
 - in GitHub Actions on a self-hosted runner
 
-The pipeline is controlled entirely by environment variables. You do **not** need to edit code in order to change output locations or disable modules.
+Deployment-specific behavior is controlled by environment variables; dataset selection and scheduling live in JSON config files. You do **not** need to edit code in order to change output locations or disable modules.
 
 ## Module enable / disable
 
@@ -19,20 +19,20 @@ Each top-level module is controlled by its output directory variable:
 
 - `EGOV_OUT_DIR`
 - `LOCATION_OUT_DIR`
-- `FINANCE_OUT_DIR`
+- `CES_EXPORT_OUT_DIR`
 
 Behavior:
 
-- variable **unset** → use the default path under `DATA_ROOT`
 - variable set to a **non-empty** path → run the module there
-- variable set to the **empty string** → skip that module completely
+- variable set to the **empty string** → skip the module
+- variable **unset** → the current orchestrator treats it as disabled unless a runner env file sets it; for predictable deployment, set it explicitly in `runner-env.sh`
 
 This skip-by-empty-dir behavior is implemented in both:
 
 - `scripts/build-data.sh`
 - `.github/workflows/datasets.yml`
 
-So, for example, if `FINANCE_OUT_DIR=""`, the CES module is skipped and the workflow does not require or validate `CES_ORG_NAME`, `CES_SECRETS_DIR`, or CES credential files.
+So, for example, if `CES_EXPORT_OUT_DIR=""`, the CES module is skipped and the workflow does not require or validate `CES_ORG_NAME`, `CES_SECRETS_DIR`, or CES credential files.
 
 ## Secrets and credentials
 
@@ -40,24 +40,24 @@ There are **no GitHub Actions repository secrets** required by this repo.
 
 The `egov` and `nuts` modules use public endpoints.
 
-The `ces-harvest` module still requires local credential files when enabled:
+The `ces-export` module still requires local credential files when enabled:
 
 - `APIKEY`
 - `USER`
 - `PASS`
 - `URI`
 
-These are provided from a machine-local directory via `CES_SECRETS_DIR` and passed into `systemd-run` by `ces-harvest/run.sh`.
+These are provided from a machine-local directory via `CES_SECRETS_DIR` and passed into `systemd-run` by `ces-export/run.sh`.
 
 ## Repository layout
 
 - `scripts/build-data.sh` — top-level orchestrator run by GitHub Actions and suitable for local runs
 - `.github/workflows/datasets.yml` — self-hosted runner workflow
 - `runner-env.example.sh` — example machine-local environment file
-- `make_index.py` — builds directory index pages for the harvested output tree
+- `make_index.py` — builds directory index pages for the exported output tree
 - `egov/` — MetaIS public report and CMDB cloud-service pipeline
-- `nuts/` — location/address CSV harvesting
-- `ces-harvest/` — CES harvesting package and wrapper script
+- `nuts/` — location/address CSV fetching
+- `ces-export/` — CES exporting package and wrapper script
 - `resources/` — static assets used by generated directory indexes
 
 ## Setup
@@ -89,25 +89,25 @@ Typical values:
 export PYTHON_BIN=/absolute/path/to/venv/bin/python
 export DATA_ROOT=/absolute/path/to/persistent/data
 
-# MIRRI harvests these and publishes into https://datova-kancelaria.github.io/datasets/egov or /location, leave empty to disable
+# MIRRI fetches these and publishes into https://datova-kancelaria.github.io/datasets/egov or /location, leave empty to disable
 export EGOV_OUT_DIR=""
 export LOCATION_OUT_DIR=""
-# keep this non-empty to harvest CES data for your org
-export FINANCE_OUT_DIR="$DATA_ROOT/finance-<your-org>"
+# keep this non-empty to export CES data for your org
+export CES_EXPORT_OUT_DIR="$DATA_ROOT/finance-<your-org>"
 
 export LOCATION_DATA_DAYS_REFRESH=30
-export CES_CONFIG=
+export CES_CONFIG=/opt/datasets/datasets.json
 ```
 
 To disable a module, set its output directory to the empty string:
 
 ```bash
-export FINANCE_OUT_DIR=""
+export CES_EXPORT_OUT_DIR=""
 ```
 
-### 4. CES-only settings when finance is enabled
+### 4. CES-only settings when ces-export is enabled
 
-Only needed when `FINANCE_OUT_DIR` is non-empty:
+Only needed when `CES_EXPORT_OUT_DIR` is non-empty:
 
 ```bash
 export CES_SECRETS_DIR=/absolute/path/to/ces-secrets
@@ -123,7 +123,7 @@ Expected files inside `CES_SECRETS_DIR`:
 
 `APIKEY`, `USER`, and `PASS` belong to your technical account and are provided by MFSR upon request. Do not forget to request whitelisting of your machine's egress IP.
 
-`URI` is a machine-local JSON file that defines the concrete OD endpoint URLs used by the harvester, for example:
+`URI` is a machine-local JSON file that defines the concrete OD endpoint URLs used by the fetcher, for example:
 
 ```json
 {
@@ -144,7 +144,7 @@ source /opt/datasets/runner-env.sh
 
 ### 6. Run in GitHub Actions
 
-The workflow expects `/opt/datasets/runner-env.sh` to exist on the self-hosted runner machine. It loads that file, applies defaults for unset values, skips disabled modules, builds the output tree, and finally runs `make_index.py` on `DATA_ROOT`.
+The workflow expects `/opt/datasets/runner-env.sh` to exist on the self-hosted runner machine. It loads that file, skips disabled modules, builds the output tree, and finally runs `make_index.py` on `DATA_ROOT`.
 
 ## What each module produces
 
@@ -170,7 +170,7 @@ Under `LOCATION_OUT_DIR`, the pipeline writes:
 
 ### CES
 
-Under `FINANCE_OUT_DIR`, `ces-harvest` writes dataset outputs according to `ces-harvest/config/datasets.json`, including chunk files, merged files, manifests, and optional postprocessed derivatives.
+Under `CES_EXPORT_OUT_DIR`, `ces-export` writes dataset outputs according to `ces-export/config/datasets.json`, including chunk files, merged files, manifests, and optional postprocessed derivatives.
 
 ## Orchestration details
 
@@ -180,7 +180,7 @@ Under `FINANCE_OUT_DIR`, `ces-harvest` writes dataset outputs according to `ces-
 - `python egov/convert.py --data-dir <EGOV_OUT_DIR>`
 - `python egov/cloud_services.py --out-dir <EGOV_OUT_DIR>`
 - `python nuts/fetch-nuts.py --out-dir <LOCATION_OUT_DIR> --refresh-days <LOCATION_DATA_DAYS_REFRESH>`
-- `ces-harvest/run.sh --out-dir <FINANCE_OUT_DIR>`
+- `ces-export/run.sh --out-dir <CES_EXPORT_OUT_DIR>`
 
 The eGov cloud-services helper has additional optional tuning flags (`--created-at-from`, `--created-at-to`, `--window-target-count`, `--page-size`, `--probe-page-size`), but the top-level orchestrator deliberately uses its defaults.
 
@@ -192,7 +192,7 @@ Disable all modules:
 DATA_ROOT=/tmp/datasets-test \
 EGOV_OUT_DIR='' \
 LOCATION_OUT_DIR='' \
-FINANCE_OUT_DIR='' \
+CES_EXPORT_OUT_DIR='' \
 PYTHON_BIN=python3 \
 ./scripts/build-data.sh
 ```

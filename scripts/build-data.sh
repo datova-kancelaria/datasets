@@ -8,13 +8,13 @@ if [[ -z "${DATA_ROOT:-}" ]]; then
   DATA_ROOT="$REPO_ROOT/data"
 fi
 if [[ ${EGOV_OUT_DIR+x} != x ]]; then
-  EGOV_OUT_DIR="$DATA_ROOT/egov"
+  EGOV_OUT_DIR=""
 fi
 if [[ ${LOCATION_OUT_DIR+x} != x ]]; then
-  LOCATION_OUT_DIR="$DATA_ROOT/location"
+  LOCATION_OUT_DIR=""
 fi
-if [[ ${FINANCE_OUT_DIR+x} != x ]]; then
-  FINANCE_OUT_DIR="$DATA_ROOT/finance-mirri"
+if [[ ${CES_EXPORT_OUT_DIR+x} != x ]]; then
+  CES_EXPORT_OUT_DIR=""
 fi
 if [[ -z "${LOCATION_DATA_DAYS_REFRESH:-}" ]]; then
   LOCATION_DATA_DAYS_REFRESH=30
@@ -28,7 +28,7 @@ mkdir -p "$DATA_ROOT"
 echo "DATA_ROOT=$DATA_ROOT"
 echo "EGOV_OUT_DIR=$EGOV_OUT_DIR"
 echo "LOCATION_OUT_DIR=$LOCATION_OUT_DIR"
-echo "FINANCE_OUT_DIR=$FINANCE_OUT_DIR"
+echo "CES_EXPORT_OUT_DIR=$CES_EXPORT_OUT_DIR"
 echo "LOCATION_DATA_DAYS_REFRESH=$LOCATION_DATA_DAYS_REFRESH"
 echo "PYTHON_BIN=$PYTHON_BIN"
 
@@ -52,10 +52,10 @@ else
   echo "[nuts] skipped (output dir disabled)"
 fi
 
-if [[ -n "$FINANCE_OUT_DIR" ]]; then
-  mkdir -p "$FINANCE_OUT_DIR"
-  echo "[ces-harvest] running -> $FINANCE_OUT_DIR"
-  "$REPO_ROOT/ces-harvest/run.sh" --out-dir "$FINANCE_OUT_DIR"
+if [[ -n "$CES_EXPORT_OUT_DIR" ]]; then
+  mkdir -p "$CES_EXPORT_OUT_DIR"
+  echo "[ces-export] running -> $CES_EXPORT_OUT_DIR"
+  "$REPO_ROOT/ces-export/run.sh" --out-dir "$CES_EXPORT_OUT_DIR"
 else
-  echo "[ces-harvest] skipped (output dir disabled)"
+  echo "[ces-export] skipped (output dir disabled)"
 fi

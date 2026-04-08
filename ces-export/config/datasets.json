@@ -1,6 +1,5 @@
 {
   "defaults": {
-    "out_dir": "finance-mirri",
     "formats": {
       "csv": {
         "enabled": true,
