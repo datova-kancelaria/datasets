@@ -1,0 +1,3 @@
+[submodule "ces-export"]
+	path = ces-export
+	url = git@github.com:datova-kancelaria/ces-export-template.git
