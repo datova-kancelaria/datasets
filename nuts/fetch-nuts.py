@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import shutil
 import time
 from pathlib import Path
 from typing import Any
@@ -72,6 +73,7 @@ def effective_refresh_days(cli_value: int | None) -> int:
     if cli_value is not None:
         return cli_value
     import os
+
     return int(os.environ.get("LOCATION_DATA_DAYS_REFRESH", "30"))
 
 
@@ -86,6 +88,10 @@ def expected_files(out_dir: Path) -> list[Path]:
     return [out_dir / "kraje.csv"] + [
         out_dir / f"{abb}.csv" for abb in name_to_abb.values()
     ]
+
+
+def has_existing_outputs(out_dir: Path) -> bool:
+    return any(path.exists() for path in expected_files(out_dir))
 
 
 def should_refresh(out_dir: Path, refresh_days: int) -> bool:
@@ -115,7 +121,7 @@ def fetch_json_with_retry(
             return resp.json()
         except (requests.exceptions.RequestException, ValueError) as e:
             if attempt < tries - 1:
-                time.sleep(backoff ** attempt)
+                time.sleep(backoff**attempt)
             else:
                 print(f"[FAIL] {url} after {tries} tries: {e}")
 
@@ -350,6 +356,61 @@ def remove_if_header_only(path: Path) -> None:
         path.unlink()
 
 
+def count_data_rows(path: Path) -> int:
+    if not path.exists():
+        return 0
+    with path.open("r", newline="", encoding="utf-8") as f:
+        reader = csv.reader(f)
+        next(reader, None)
+        return sum(1 for _ in reader)
+
+
+def count_generated_rows(out_dir: Path, unknown_path: Path) -> int:
+    total = 0
+    for abb in name_to_abb.values():
+        total += count_data_rows(out_dir / f"{abb}.csv")
+    total += count_data_rows(unknown_path)
+    return total
+
+
+def staging_dir_for(out_dir: Path) -> Path:
+    return out_dir.parent / f".{out_dir.name}.tmp"
+
+
+def prepare_staging_dir(out_dir: Path) -> Path:
+    staging_dir = staging_dir_for(out_dir)
+    if staging_dir.exists():
+        shutil.rmtree(staging_dir)
+    staging_dir.mkdir(parents=True, exist_ok=True)
+    return staging_dir
+
+
+def install_outputs(staging_dir: Path, out_dir: Path) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    for path in expected_files(out_dir):
+        path.unlink(missing_ok=True)
+
+    unknown_target = out_dir / "_UNKNOWN.csv"
+    pending_target = out_dir / "_PENDING_UNKNOWN.csv"
+    unknown_target.unlink(missing_ok=True)
+    pending_target.unlink(missing_ok=True)
+
+    for src in staging_dir.glob("*.csv"):
+        shutil.move(str(src), str(out_dir / src.name))
+
+
+def cleanup_staging_dir(staging_dir: Path) -> None:
+    if staging_dir.exists():
+        shutil.rmtree(staging_dir)
+
+
+def keep_existing_outputs_message(reason: str, out_dir: Path) -> int:
+    print(f"NUTS refresh skipped: {reason}")
+    print(f"Keeping existing outputs in {out_dir}")
+    return 0
+
+
 def main() -> int:
     args = parse_args()
     out_dir = args.out_dir
@@ -365,68 +426,63 @@ def main() -> int:
 
     print("Obtaining URIs...")
     uris = parse_dataset(URI_root)
+    if not uris:
+        if has_existing_outputs(out_dir):
+            return keep_existing_outputs_message(
+                f"failed to obtain dataset catalog from {URI_root}", out_dir
+            )
+        print(f"NUTS refresh failed: could not obtain dataset catalog from {URI_root}")
+        return 1
 
-    print("Opening region files...")
-    (
-        region_files,
-        region_writers,
-        unknown_file,
-        unknown_writer,
-        unknown_path,
-        pending_file,
-        pending_writer,
-        pending_path,
-    ) = open_region_writers(out_dir)
-
-    seen_unknown_kraje: set[str] = set()
-
-    okres_id_to_region: dict[str, tuple[str, str]] = {}
-    okres_name_to_region: dict[str, tuple[str, str]] = {}
-    obec_id_to_region: dict[str, tuple[str, str]] = {}
-    obec_name_to_region: dict[str, tuple[str, str]] = {}
+    staging_dir = prepare_staging_dir(out_dir)
 
     try:
-        s = requests.Session()
+        print("Opening region files...")
+        (
+            region_files,
+            region_writers,
+            unknown_file,
+            unknown_writer,
+            unknown_path,
+            pending_file,
+            pending_writer,
+            pending_path,
+        ) = open_region_writers(staging_dir)
 
-        for uri in tqdm(uris, desc="Fetching datasets", unit="dataset"):
-            r = fetch_json_with_retry(
-                uri,
-                session=s,
-                tries=6,
-                timeout=30.0,
-                backoff=1.7,
-            )
-            if r is None:
-                continue
+        seen_unknown_kraje: set[str] = set()
 
-            current = r.get("features", [])
-            if not current:
-                print(f"Warning: features in {uri} is empty/does not exist!")
-                continue
+        okres_id_to_region: dict[str, tuple[str, str]] = {}
+        okres_name_to_region: dict[str, tuple[str, str]] = {}
+        obec_id_to_region: dict[str, tuple[str, str]] = {}
+        obec_name_to_region: dict[str, tuple[str, str]] = {}
 
-            for feature in current:
-                if not isinstance(feature, dict):
+        rows_written = 0
+
+        try:
+            s = requests.Session()
+
+            for uri in tqdm(uris, desc="Fetching datasets", unit="dataset"):
+                r = fetch_json_with_retry(
+                    uri,
+                    session=s,
+                    tries=6,
+                    timeout=30.0,
+                    backoff=1.7,
+                )
+                if r is None:
                     continue
 
-                row = feature_to_row(feature)
+                current = r.get("features", [])
+                if not current:
+                    print(f"Warning: features in {uri} is empty/does not exist!")
+                    continue
 
-                learn_region_maps(
-                    row,
-                    okres_id_to_region,
-                    okres_name_to_region,
-                    obec_id_to_region,
-                    obec_name_to_region,
-                )
+                for feature in current:
+                    if not isinstance(feature, dict):
+                        continue
 
-                filled = try_fill_missing_kraj(
-                    row,
-                    okres_id_to_region,
-                    okres_name_to_region,
-                    obec_id_to_region,
-                    obec_name_to_region,
-                )
+                    row = feature_to_row(feature)
 
-                if filled:
                     learn_region_maps(
                         row,
                         okres_id_to_region,
@@ -435,45 +491,75 @@ def main() -> int:
                         obec_name_to_region,
                     )
 
-                kraj = row[1].strip()
+                    filled = try_fill_missing_kraj(
+                        row,
+                        okres_id_to_region,
+                        okres_name_to_region,
+                        obec_id_to_region,
+                        obec_name_to_region,
+                    )
 
-                if kraj in region_writers:
-                    region_writers[kraj].writerow(row)
-                else:
-                    pending_writer.writerow(row)
+                    if filled:
+                        learn_region_maps(
+                            row,
+                            okres_id_to_region,
+                            okres_name_to_region,
+                            obec_id_to_region,
+                            obec_name_to_region,
+                        )
 
-            del r
-            del current
+                    kraj = row[1].strip()
 
-        resolve_pending_rows(
-            pending_path,
-            unknown_writer,
-            region_writers,
-            seen_unknown_kraje,
-            okres_id_to_region,
-            okres_name_to_region,
-            obec_id_to_region,
-            obec_name_to_region,
-        )
+                    if kraj in region_writers:
+                        region_writers[kraj].writerow(row)
+                        rows_written += 1
+                    else:
+                        pending_writer.writerow(row)
+
+                del r
+                del current
+
+            resolve_pending_rows(
+                pending_path,
+                unknown_writer,
+                region_writers,
+                seen_unknown_kraje,
+                okres_id_to_region,
+                okres_name_to_region,
+                obec_id_to_region,
+                obec_name_to_region,
+            )
+
+        finally:
+            for f in region_files.values():
+                f.close()
+            unknown_file.close()
+            pending_file.close()
+
+        remove_if_header_only(unknown_path)
+        remove_if_header_only(pending_path)
+
+        generated_rows = count_generated_rows(staging_dir, unknown_path)
+        if generated_rows == 0 and rows_written == 0:
+            if has_existing_outputs(out_dir):
+                return keep_existing_outputs_message(
+                    "catalog was fetched but no dataset rows were produced", out_dir
+                )
+            print("NUTS refresh failed: catalog was fetched but no dataset rows were produced")
+            return 1
+
+        if seen_unknown_kraje:
+            print("Warning: Kraj values not in name_to_abb:")
+            for kraj in sorted(seen_unknown_kraje):
+                print(f"  - {kraj}")
+
+        print("Building kraje.csv...")
+        build_kraje_csv(staging_dir, unknown_path)
+        install_outputs(staging_dir, out_dir)
+        return 0
 
     finally:
-        for f in region_files.values():
-            f.close()
-        unknown_file.close()
-        pending_file.close()
-
-    remove_if_header_only(unknown_path)
-    remove_if_header_only(pending_path)
-
-    if seen_unknown_kraje:
-        print("Warning: Kraj values not in name_to_abb:")
-        for kraj in sorted(seen_unknown_kraje):
-            print(f"  - {kraj}")
-
-    print("Building kraje.csv...")
-    build_kraje_csv(out_dir, unknown_path)
-
-    return 0
+        cleanup_staging_dir(staging_dir)
 
 
 if __name__ == "__main__":
