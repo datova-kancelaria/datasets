@@ -2,17 +2,21 @@ from __future__ import annotations
 
 import argparse
 import csv
+import os
 import shutil
 import time
+from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
+from urllib.parse import urlparse
 
 import requests
 from tqdm import tqdm
 
-URI_root = "https://rageo.minv.sk/opendata/katalog.json"
+URI_ROOT = "https://rageo.minv.sk/opendata/katalog.json"
 
-name_to_abb = {
+NAME_TO_ABB = {
     "Banskobystrický": "BBSK",
     "Bratislavský": "BSK",
     "Nitriansky": "NSK",
@@ -23,48 +27,168 @@ name_to_abb = {
     "Žilinský": "ZSK",
 }
 
-region_order = [
-    "Bratislavský",
-    "Trnavský",
-    "Trenčiansky",
-    "Nitriansky",
-    "Žilinský",
-    "Banskobystrický",
-    "Prešovský",
-    "Košický",
+KRAJE_HEADER = [
+    "Kraj",
+    "Kraj - ID",
+    "ID objektu",
+    "IČO",
+    "Platné od",
 ]
 
-HEADER = [
-    "Identifikátor",
-    "Kraj",
-    "ID kraja",
+OKRESY_HEADER = [
     "Okres",
-    "ID Okresu",
+    "Okres - ID",
+    "Kraj",
+    "Kraj - ID",
+    "ID objektu",
+    "IČO",
+    "Platné od",
+]
+
+OBCE_HEADER = [
     "Obec",
-    "ID obce",
-    "Časť obce",
+    "Obec - ID",
+    "Okres",
+    "Okres - ID",
+    "Kraj",
+    "Kraj - ID",
+    "ID objektu",
+    "IČO",
+    "Platné od",
+]
+
+ULICE_HEADER = [
     "Ulica",
+    "Ulica - ID",
+    "Obec",
+    "Obec - ID",
+    "Okres",
+    "Okres - ID",
+    "Kraj",
+    "Kraj - ID",
+    "Platné od",
+]
+
+ADDRESS_HEADER = [
+    "ID budovy",
+    "ID objektu",
+    "Ulica",
+    "Ulica - ID",
     "Súpisné číslo",
-    "Orientačné číslo celé",
+    "Orientačné číslo",
     "PSČ",
+    "Časť obce",
+    "Časť obce - ID",
+    "Obec",
+    "Obec - ID",
+    "Okres",
+    "Okres - ID",
+    "Kraj",
+    "Kraj - ID",
+    "Platné od",
     "ADRBOD_X",
     "ADRBOD_Y",
+    "URI",
 ]
+
+BUILDING_HEADER = [
+    "ID budovy",
+    "Typ budovy",
+    "Typ budovy - kód",
+    "Účel budovy",
+    "Účel budovy - kód",
+    "Súpisné číslo",
+    "Obec",
+    "Obec - ID",
+    "Okres",
+    "Okres - ID",
+    "Kraj",
+    "Kraj - ID",
+    "Platné od",
+]
+
+
+@dataclass(frozen=True)
+class RegionInfo:
+    kraj_name: str
+    kraj_id: str
+    okres_name: str = ""
+    okres_id: str = ""
+    obec_name: str = ""
+    obec_id: str = ""
+
+
+@dataclass(frozen=True)
+class DatasetGroups:
+    nuts3: list[str]
+    lau1: list[str]
+    lau2: list[str]
+    msa: list[str]
+    maa: list[str]
+    mba: list[str]
+    other: list[str]
+
+
+class CsvSink:
+    def __init__(self, path: Path, header: list[str]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.path = path
+        self._file = path.open("w", newline="", encoding="utf-8-sig")
+        self._writer = csv.DictWriter(self._file, fieldnames=header)
+        self._writer.writeheader()
+        self.rows_written = 0
+
+    def write(self, row: dict[str, Any]) -> None:
+        clean = {key: clean_str(row.get(key)) for key in self._writer.fieldnames}
+        self._writer.writerow(clean)
+        self.rows_written += 1
+
+    def close(self) -> None:
+        self._file.close()
+
+
+class OutputManager:
+    def __init__(self, out_dir: Path) -> None:
+        self.out_dir = out_dir
+        self.kraje = CsvSink(out_dir / "nuts3.csv", KRAJE_HEADER)
+        self.okresy = CsvSink(out_dir / "lau1.csv", OKRESY_HEADER)
+        self.obce = CsvSink(out_dir / "lau2.csv", OBCE_HEADER)
+        self.ulice = CsvSink(out_dir / "streets.csv", ULICE_HEADER)
+        self.addresses: dict[str, CsvSink] = {}
+        self.buildings: dict[str, CsvSink] = {}
+
+        addresses_dir = out_dir / "addresses"
+        buildings_dir = out_dir / "buildings"
+        for kraj_name, abb in NAME_TO_ABB.items():
+            self.addresses[kraj_name] = CsvSink(addresses_dir / f"{abb}.csv", ADDRESS_HEADER)
+            self.buildings[kraj_name] = CsvSink(buildings_dir / f"{abb}.csv", BUILDING_HEADER)
+
+    def close(self) -> None:
+        self.kraje.close()
+        self.okresy.close()
+        self.obce.close()
+        self.ulice.close()
+        for sink in self.addresses.values():
+            sink.close()
+        for sink in self.buildings.values():
+            sink.close()
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="Fetch Slovak location datasets and write separate reference, address, and building CSV files."
+    )
     parser.add_argument(
         "--out-dir",
         type=Path,
         default=Path(__file__).resolve().parents[1] / "data" / "location",
-        help="Directory where NUTS/location CSV files will be written",
+        help="Directory where CSV files will be written",
     )
     parser.add_argument(
         "--refresh-days",
         type=int,
         default=None,
-        help="Skip refresh when kraje.csv is newer than this many days",
+        help="Skip refresh when nuts3.csv is newer than this many days",
     )
     return parser.parse_args()
 
@@ -72,8 +196,6 @@ def parse_args() -> argparse.Namespace:
 def effective_refresh_days(cli_value: int | None) -> int:
     if cli_value is not None:
         return cli_value
-    import os
-
     return int(os.environ.get("LOCATION_DATA_DAYS_REFRESH", "30"))
 
 
@@ -85,9 +207,16 @@ def is_fresh(path: Path, refresh_days: int) -> bool:
 
 
 def expected_files(out_dir: Path) -> list[Path]:
-    return [out_dir / "kraje.csv"] + [
-        out_dir / f"{abb}.csv" for abb in name_to_abb.values()
+    files = [
+        out_dir / "nuts3.csv",
+        out_dir / "lau1.csv",
+        out_dir / "lau2.csv",
+        out_dir / "streets.csv",
     ]
+    for abb in NAME_TO_ABB.values():
+        files.append(out_dir / "addresses" / f"{abb}.csv")
+        files.append(out_dir / "buildings" / f"{abb}.csv")
+    return files
 
 
 def has_existing_outputs(out_dir: Path) -> bool:
@@ -96,12 +225,9 @@ def has_existing_outputs(out_dir: Path) -> bool:
 
 def should_refresh(out_dir: Path, refresh_days: int) -> bool:
     files = expected_files(out_dir)
-
     if any(not p.exists() for p in files):
         return True
-
-    sentinel = out_dir / "kraje.csv"
-    return not is_fresh(sentinel, refresh_days)
+    return not is_fresh(out_dir / "nuts3.csv", refresh_days)
 
 
 def fetch_json_with_retry(
@@ -113,264 +239,117 @@ def fetch_json_with_retry(
     backoff: float = 1.5,
 ) -> dict[str, Any] | None:
     s = session or requests
-
     for attempt in range(tries):
         try:
             resp = s.get(url, timeout=timeout)
             resp.raise_for_status()
+            resp.encoding = "utf-8"
             return resp.json()
-        except (requests.exceptions.RequestException, ValueError) as e:
+        except (requests.exceptions.RequestException, ValueError) as exc:
             if attempt < tries - 1:
                 time.sleep(backoff**attempt)
             else:
-                print(f"[FAIL] {url} after {tries} tries: {e}")
-
+                print(f"[FAIL] {url} after {tries} tries: {exc}")
     return None
 
 
-def parse_dataset(uri: str) -> list[str]:
-    r = fetch_json_with_retry(uri)
-    if r is None:
+def parse_dataset_catalog(uri: str) -> list[str]:
+    payload = fetch_json_with_retry(uri)
+    if payload is None:
         return []
 
-    graph = r.get("@graph", [])
-    for g in graph:
-        ds = g.get("dcat:dataset")
-        if ds is not None:
-            return [o["iri"] for o in ds if isinstance(o, dict) and "iri" in o]
+    graph = payload.get("@graph", [])
+    for node in graph:
+        datasets = node.get("dcat:dataset")
+        if datasets is not None:
+            return [
+                item["iri"]
+                for item in datasets
+                if isinstance(item, dict) and "iri" in item
+            ]
     return []
+
+
+def basename(uri: str) -> str:
+    return Path(urlparse(uri).path).name
+
+
+def group_dataset_uris(uris: Iterable[str]) -> DatasetGroups:
+    groups: dict[str, list[str]] = defaultdict(list)
+    for uri in uris:
+        name = basename(uri)
+        if name == "nuts3.geojson":
+            groups["nuts3"].append(uri)
+        elif name == "lau1.geojson":
+            groups["lau1"].append(uri)
+        elif name == "lau2.geojson":
+            groups["lau2"].append(uri)
+        elif name.startswith("msa_by_lau1_"):
+            groups["msa"].append(uri)
+        elif name.startswith("maa_by_lau1_"):
+            groups["maa"].append(uri)
+        elif name.startswith("mba_by_lau2_"):
+            groups["mba"].append(uri)
+        else:
+            groups["other"].append(uri)
+
+    return DatasetGroups(
+        nuts3=groups["nuts3"],
+        lau1=groups["lau1"],
+        lau2=groups["lau2"],
+        msa=groups["msa"],
+        maa=groups["maa"],
+        mba=groups["mba"],
+        other=groups["other"],
+    )
+
+
+def maybe_fix_mojibake(text: str) -> str:
+    if not text:
+        return text
+
+    suspicious = ("Ă", "Ĺ", "Ä", "Ľ", "Ť", "â")
+    if not any(ch in text for ch in suspicious):
+        return text
+
+    for source_encoding in ("cp1250", "latin1"):
+        try:
+            fixed = text.encode(source_encoding).decode("utf-8")
+        except UnicodeError:
+            continue
+
+        old_bad = sum(text.count(ch) for ch in suspicious)
+        new_bad = sum(fixed.count(ch) for ch in suspicious)
+        if new_bad < old_bad:
+            return fixed
+
+    return text
 
 
 def clean_str(value: Any) -> str:
     if value is None:
         return ""
-    return str(value)
+    return maybe_fix_mojibake(str(value))
 
 
-def feature_to_row(feature: dict[str, Any]) -> list[str]:
-    properties = feature.get("properties") or {}
+def coordinates_from_feature(feature: dict[str, Any]) -> tuple[str, str]:
     geometry = feature.get("geometry") or {}
     coords = geometry.get("coordinates") or []
-    x = coords[0] if len(coords) >= 2 else ""
-    y = coords[1] if len(coords) >= 2 else ""
-
-    return [
-        clean_str(properties.get("identifier")),
-        clean_str(properties.get("nuts3_name")),
-        clean_str(properties.get("nuts3_id")),
-        clean_str(properties.get("lau1_name")),
-        clean_str(properties.get("lau1_id")),
-        clean_str(properties.get("lau2_name")),
-        clean_str(properties.get("lau2_id")),
-        clean_str(properties.get("district_name")),
-        clean_str(properties.get("streetname")),
-        clean_str(properties.get("propertyregistrationnumber")),
-        clean_str(properties.get("orientationnumber")),
-        clean_str(properties.get("postalcode")),
-        str(x),
-        str(y),
-    ]
+    if len(coords) >= 2:
+        return clean_str(coords[0]), clean_str(coords[1])
+    return "", ""
 
 
-def open_region_writers(out_dir: Path):
-    region_files: dict[str, Any] = {}
-    region_writers: dict[str, csv.writer] = {}
-
-    for kraj, abb in name_to_abb.items():
-        path = out_dir / f"{abb}.csv"
-        f = path.open("w", newline="", encoding="utf-8")
-        w = csv.writer(f)
-        w.writerow(HEADER)
-        region_files[kraj] = f
-        region_writers[kraj] = w
-
-    unknown_path = out_dir / "_UNKNOWN.csv"
-    unknown_file = unknown_path.open("w", newline="", encoding="utf-8")
-    unknown_writer = csv.writer(unknown_file)
-    unknown_writer.writerow(HEADER)
-
-    pending_path = out_dir / "_PENDING_UNKNOWN.csv"
-    pending_file = pending_path.open("w", newline="", encoding="utf-8")
-    pending_writer = csv.writer(pending_file)
-    pending_writer.writerow(HEADER)
-
-    return (
-        region_files,
-        region_writers,
-        unknown_file,
-        unknown_writer,
-        unknown_path,
-        pending_file,
-        pending_writer,
-        pending_path,
-    )
+def feature_properties(feature: dict[str, Any]) -> dict[str, Any]:
+    props = feature.get("properties") or {}
+    return props if isinstance(props, dict) else {}
 
 
-def file_has_data_rows(path: Path) -> bool:
-    if not path.exists():
-        return False
-    with path.open("r", newline="", encoding="utf-8") as f:
-        reader = csv.reader(f)
-        next(reader, None)
-        return next(reader, None) is not None
-
-
-def append_csv_without_header(dst_writer: csv.writer, src_path: Path) -> None:
-    if not src_path.exists():
-        return
-
-    with src_path.open("r", newline="", encoding="utf-8") as fin:
-        reader = csv.reader(fin)
-        next(reader, None)
-        for row in reader:
-            dst_writer.writerow(row)
-
-
-def learn_region_maps(
-    row: list[str],
-    okres_id_to_region: dict[str, tuple[str, str]],
-    okres_name_to_region: dict[str, tuple[str, str]],
-    obec_id_to_region: dict[str, tuple[str, str]],
-    obec_name_to_region: dict[str, tuple[str, str]],
-) -> None:
-    kraj = row[1].strip()
-    kraj_id = row[2].strip()
-    okres = row[3].strip()
-    okres_id = row[4].strip()
-    obec = row[5].strip()
-    obec_id = row[6].strip()
-
-    if not kraj or not kraj_id:
-        return
-
-    region = (kraj, kraj_id)
-
-    if okres_id:
-        okres_id_to_region.setdefault(okres_id, region)
-    if okres:
-        okres_name_to_region.setdefault(okres, region)
-    if obec_id:
-        obec_id_to_region.setdefault(obec_id, region)
-    if obec:
-        obec_name_to_region.setdefault(obec, region)
-
-
-def try_fill_missing_kraj(
-    row: list[str],
-    okres_id_to_region: dict[str, tuple[str, str]],
-    okres_name_to_region: dict[str, tuple[str, str]],
-    obec_id_to_region: dict[str, tuple[str, str]],
-    obec_name_to_region: dict[str, tuple[str, str]],
-) -> bool:
-    kraj = row[1].strip()
-
-    if kraj in name_to_abb:
-        return True
-
-    okres = row[3].strip()
-    okres_id = row[4].strip()
-    obec = row[5].strip()
-    obec_id = row[6].strip()
-
-    region: tuple[str, str] | None = None
-
-    if okres_id and okres_id in okres_id_to_region:
-        region = okres_id_to_region[okres_id]
-    elif obec_id and obec_id in obec_id_to_region:
-        region = obec_id_to_region[obec_id]
-    elif okres and okres in okres_name_to_region:
-        region = okres_name_to_region[okres]
-    elif obec and obec in obec_name_to_region:
-        region = obec_name_to_region[obec]
-
-    if region is None:
-        return False
-
-    row[1], row[2] = region
-    return True
-
-
-def build_kraje_csv(out_dir: Path, unknown_path: Path) -> None:
-    target = out_dir / "kraje.csv"
-    with target.open("w", newline="", encoding="utf-8") as fout:
-        writer = csv.writer(fout)
-        writer.writerow(HEADER)
-
-        for kraj in region_order:
-            abb = name_to_abb[kraj]
-            append_csv_without_header(writer, out_dir / f"{abb}.csv")
-
-        if file_has_data_rows(unknown_path):
-            append_csv_without_header(writer, unknown_path)
-
-
-def resolve_pending_rows(
-    pending_path: Path,
-    unknown_writer: csv.writer,
-    region_writers: dict[str, csv.writer],
-    seen_unknown_kraje: set[str],
-    okres_id_to_region: dict[str, tuple[str, str]],
-    okres_name_to_region: dict[str, tuple[str, str]],
-    obec_id_to_region: dict[str, tuple[str, str]],
-    obec_name_to_region: dict[str, tuple[str, str]],
-) -> None:
-    if not pending_path.exists():
-        return
-
-    with pending_path.open("r", newline="", encoding="utf-8") as f:
-        reader = csv.reader(f)
-        next(reader, None)
-        for row in reader:
-            filled = try_fill_missing_kraj(
-                row,
-                okres_id_to_region,
-                okres_name_to_region,
-                obec_id_to_region,
-                obec_name_to_region,
-            )
-
-            if filled:
-                learn_region_maps(
-                    row,
-                    okres_id_to_region,
-                    okres_name_to_region,
-                    obec_id_to_region,
-                    obec_name_to_region,
-                )
-
-                kraj = row[1].strip()
-                if kraj in region_writers:
-                    region_writers[kraj].writerow(row)
-                    continue
-
-            unknown_writer.writerow(row)
-            kraj = row[1].strip()
-            if kraj:
-                seen_unknown_kraje.add(kraj)
-
-
-def remove_if_header_only(path: Path) -> None:
-    if not path.exists():
-        return
-    if not file_has_data_rows(path):
-        path.unlink()
-
-
-def count_data_rows(path: Path) -> int:
-    if not path.exists():
-        return 0
-    with path.open("r", newline="", encoding="utf-8") as f:
-        reader = csv.reader(f)
-        next(reader, None)
-        return sum(1 for _ in reader)
-
-
-def count_generated_rows(out_dir: Path, unknown_path: Path) -> int:
-    total = 0
-    for abb in name_to_abb.values():
-        total += count_data_rows(out_dir / f"{abb}.csv")
-    total += count_data_rows(unknown_path)
-    return total
+def iter_features(payload: dict[str, Any]) -> Iterable[dict[str, Any]]:
+    features = payload.get("features", [])
+    if not isinstance(features, list):
+        return []
+    return (feature for feature in features if isinstance(feature, dict))
 
 
 def staging_dir_for(out_dir: Path) -> Path:
@@ -385,18 +364,34 @@ def prepare_staging_dir(out_dir: Path) -> Path:
     return staging_dir
 
 
+def remove_legacy_outputs(out_dir: Path) -> None:
+    legacy_files = {
+        out_dir / "kraje.csv",
+        out_dir / "okresy.csv",
+        out_dir / "obce.csv",
+        out_dir / "ulice.csv",
+        out_dir / "_UNKNOWN.csv",
+        out_dir / "_PENDING_UNKNOWN.csv",
+    }
+    for abb in NAME_TO_ABB.values():
+        legacy_files.add(out_dir / f"{abb}.csv")
+        legacy_files.add(out_dir / f"{abb}_buildings.csv")
+
+    for path in legacy_files:
+        path.unlink(missing_ok=True)
+
+
 def install_outputs(staging_dir: Path, out_dir: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     for path in expected_files(out_dir):
         path.unlink(missing_ok=True)
 
-    unknown_target = out_dir / "_UNKNOWN.csv"
-    pending_target = out_dir / "_PENDING_UNKNOWN.csv"
-    unknown_target.unlink(missing_ok=True)
-    pending_target.unlink(missing_ok=True)
+    shutil.rmtree(out_dir / "addresses", ignore_errors=True)
+    shutil.rmtree(out_dir / "buildings", ignore_errors=True)
+    remove_legacy_outputs(out_dir)
 
-    for src in staging_dir.glob("*.csv"):
+    for src in staging_dir.iterdir():
         shutil.move(str(src), str(out_dir / src.name))
 
 
@@ -406,9 +401,277 @@ def cleanup_staging_dir(staging_dir: Path) -> None:
 
 
 def keep_existing_outputs_message(reason: str, out_dir: Path) -> int:
-    print(f"NUTS refresh skipped: {reason}")
+    print(f"Location refresh skipped: {reason}")
     print(f"Keeping existing outputs in {out_dir}")
     return 0
+
+
+def process_nuts3(
+    session: requests.Session,
+    uris: list[str],
+    outputs: OutputManager,
+    region_by_nuts3: dict[str, RegionInfo],
+) -> None:
+    seen_ids: set[tuple[str, str]] = set()
+    for uri in uris:
+        payload = fetch_json_with_retry(
+            uri, session=session, tries=6, timeout=30.0, backoff=1.7
+        )
+        if payload is None:
+            continue
+        for feature in iter_features(payload):
+            props = feature_properties(feature)
+            kraj_id = clean_str(props.get("nuts3_id"))
+            kraj_name = clean_str(props.get("nuts3_name"))
+            if not kraj_id or not kraj_name:
+                continue
+            region_by_nuts3[kraj_id] = RegionInfo(kraj_name=kraj_name, kraj_id=kraj_id)
+            key = (kraj_id, clean_str(props.get("objectid")))
+            if key in seen_ids:
+                continue
+            seen_ids.add(key)
+            outputs.kraje.write(
+                {
+                    "Kraj": kraj_name,
+                    "Kraj - ID": kraj_id,
+                    "ID objektu": props.get("objectid"),
+                    "IČO": props.get("ico"),
+                    "Platné od": props.get("validfrom"),
+                }
+            )
+
+
+def process_lau1(
+    session: requests.Session,
+    uris: list[str],
+    outputs: OutputManager,
+    region_by_lau1: dict[str, RegionInfo],
+    region_by_nuts3: dict[str, RegionInfo],
+) -> None:
+    seen_ids: set[tuple[str, str]] = set()
+    for uri in uris:
+        payload = fetch_json_with_retry(
+            uri, session=session, tries=6, timeout=30.0, backoff=1.7
+        )
+        if payload is None:
+            continue
+        for feature in iter_features(payload):
+            props = feature_properties(feature)
+            okres_id = clean_str(props.get("lau1_id"))
+            okres_name = clean_str(props.get("lau1_name"))
+            kraj_id = clean_str(props.get("nuts3_id"))
+            kraj_name = clean_str(props.get("nuts3_name"))
+            if not okres_id or not kraj_id:
+                continue
+            base_region = region_by_nuts3.get(kraj_id)
+            if not kraj_name and base_region is not None:
+                kraj_name = base_region.kraj_name
+            info = RegionInfo(
+                kraj_name=kraj_name,
+                kraj_id=kraj_id,
+                okres_name=okres_name,
+                okres_id=okres_id,
+            )
+            region_by_lau1[okres_id] = info
+            key = (okres_id, clean_str(props.get("objectid")))
+            if key in seen_ids:
+                continue
+            seen_ids.add(key)
+            outputs.okresy.write(
+                {
+                    "Okres": okres_name,
+                    "Okres - ID": okres_id,
+                    "Kraj": kraj_name,
+                    "Kraj - ID": kraj_id,
+                    "ID objektu": props.get("objectid"),
+                    "IČO": props.get("ico"),
+                    "Platné od": props.get("validfrom"),
+                }
+            )
+
+
+def process_lau2(
+    session: requests.Session,
+    uris: list[str],
+    outputs: OutputManager,
+    region_by_lau1: dict[str, RegionInfo],
+    region_by_lau2: dict[str, RegionInfo],
+) -> None:
+    seen_ids: set[tuple[str, str]] = set()
+    for uri in uris:
+        payload = fetch_json_with_retry(
+            uri, session=session, tries=6, timeout=30.0, backoff=1.7
+        )
+        if payload is None:
+            continue
+        for feature in iter_features(payload):
+            props = feature_properties(feature)
+            obec_id = clean_str(props.get("lau2_id"))
+            obec_name = clean_str(props.get("lau2_name"))
+            okres_id = clean_str(props.get("lau1_id"))
+            okres_info = region_by_lau1.get(okres_id)
+            if not obec_id or okres_info is None:
+                continue
+            info = RegionInfo(
+                kraj_name=okres_info.kraj_name,
+                kraj_id=okres_info.kraj_id,
+                okres_name=okres_info.okres_name,
+                okres_id=okres_info.okres_id,
+                obec_name=obec_name,
+                obec_id=obec_id,
+            )
+            region_by_lau2[obec_id] = info
+            key = (obec_id, clean_str(props.get("objectid")))
+            if key in seen_ids:
+                continue
+            seen_ids.add(key)
+            outputs.obce.write(
+                {
+                    "Obec": obec_name,
+                    "Obec - ID": obec_id,
+                    "Okres": info.okres_name,
+                    "Okres - ID": info.okres_id,
+                    "Kraj": info.kraj_name,
+                    "Kraj - ID": info.kraj_id,
+                    "ID objektu": props.get("objectid"),
+                    "IČO": props.get("ico"),
+                    "Platné od": props.get("validfrom"),
+                }
+            )
+
+
+def process_msa(
+    session: requests.Session,
+    uris: list[str],
+    outputs: OutputManager,
+    region_by_lau1: dict[str, RegionInfo],
+) -> None:
+    seen_rows: set[str] = set()
+    for uri in tqdm(uris, desc="Fetching street datasets", unit="dataset"):
+        payload = fetch_json_with_retry(
+            uri, session=session, tries=6, timeout=30.0, backoff=1.7
+        )
+        if payload is None:
+            continue
+        for feature in iter_features(payload):
+            props = feature_properties(feature)
+            street_id = clean_str(props.get("identifier"))
+            street_name = clean_str(props.get("streetname"))
+
+            okres_id = clean_str(props.get("lau1_id"))
+            region = region_by_lau1.get(okres_id)
+            if region is None:
+                continue
+
+            if street_id in seen_rows:
+                continue
+            seen_rows.add(street_id)
+            outputs.ulice.write(
+                {
+                    "Ulica": street_name,
+                    "Ulica - ID": street_id,
+                    "Obec": props.get("lau2_name"),
+                    "Obec - ID": props.get("lau2_id"),
+                    "Okres": region.okres_name,
+                    "Okres - ID": region.okres_id,
+                    "Kraj": region.kraj_name,
+                    "Kraj - ID": region.kraj_id,
+                    "Platné od": props.get("validfrom"),
+                }
+            )
+
+
+def process_mba(
+    session: requests.Session,
+    uris: list[str],
+    outputs: OutputManager,
+    region_by_lau2: dict[str, RegionInfo],
+) -> int:
+    rows_written = 0
+
+    for uri in tqdm(uris, desc="Fetching building datasets", unit="dataset"):
+        payload = fetch_json_with_retry(
+            uri, session=session, tries=6, timeout=30.0, backoff=1.7
+        )
+        if payload is None:
+            continue
+        for feature in iter_features(payload):
+            props = feature_properties(feature)
+            obec_id = clean_str(props.get("lau2_id"))
+            region = region_by_lau2.get(obec_id)
+            if region is None:
+                continue
+            sink = outputs.buildings.get(region.kraj_name)
+            if sink is None:
+                continue
+
+            sink.write(
+                {
+                    "ID budovy": props.get("identifier"),
+                    "Typ budovy": props.get("buildingtypecodename"),
+                    "Typ budovy - kód": props.get("buildingtypecode"),
+                    "Účel budovy": props.get("buildingpurposename"),
+                    "Účel budovy - kód": props.get("buildingpurposecode"),
+                    "Súpisné číslo": props.get("propertyregistrationnumber"),
+                    "Obec": region.obec_name,
+                    "Obec - ID": region.obec_id,
+                    "Okres": region.okres_name,
+                    "Okres - ID": region.okres_id,
+                    "Kraj": region.kraj_name,
+                    "Kraj - ID": region.kraj_id,
+                    "Platné od": props.get("validfrom"),
+                }
+            )
+            rows_written += 1
+
+    return rows_written
+
+
+def process_maa(
+    session: requests.Session,
+    uris: list[str],
+    outputs: OutputManager,
+) -> int:
+    rows_written = 0
+    for uri in tqdm(uris, desc="Fetching address datasets", unit="dataset"):
+        payload = fetch_json_with_retry(
+            uri, session=session, tries=6, timeout=30.0, backoff=1.7
+        )
+        if payload is None:
+            continue
+        for feature in iter_features(payload):
+            props = feature_properties(feature)
+            kraj_name = clean_str(props.get("nuts3_name"))
+            sink = outputs.addresses.get(kraj_name)
+            if sink is None:
+                continue
+
+            x, y = coordinates_from_feature(feature)
+            sink.write(
+                {
+                    "ID budovy": props.get("identifier"),
+                    "ID objektu": props.get("objectid"),
+                    "Ulica": props.get("streetname"),
+                    "Ulica - ID": props.get("street_id"),
+                    "Súpisné číslo": props.get("propertyregistrationnumber"),
+                    "Orientačné číslo": props.get("orientationnumber"),
+                    "PSČ": props.get("postalcode"),
+                    "Časť obce": props.get("district_name"),
+                    "Časť obce - ID": props.get("district_id"),
+                    "Obec": props.get("lau2_name"),
+                    "Obec - ID": props.get("lau2_id"),
+                    "Okres": props.get("lau1_name"),
+                    "Okres - ID": props.get("lau1_id"),
+                    "Kraj": kraj_name,
+                    "Kraj - ID": props.get("nuts3_id"),
+                    "Platné od": props.get("validfrom"),
+                    "ADRBOD_X": x,
+                    "ADRBOD_Y": y,
+                    "URI": props.get("uri_identifier"),
+                }
+            )
+            rows_written += 1
+    return rows_written
 
 
 def main() -> int:
@@ -420,144 +683,72 @@ def main() -> int:
 
     if not should_refresh(out_dir, refresh_days):
         print(
-            f"Skipping NUTS refresh: all expected files exist and are newer than {refresh_days} days"
+            f"Skipping location refresh: all expected files exist and are newer than {refresh_days} days"
         )
         return 0
 
-    print("Obtaining URIs...")
-    uris = parse_dataset(URI_root)
+    print("Obtaining dataset catalog...")
+    uris = parse_dataset_catalog(URI_ROOT)
     if not uris:
         if has_existing_outputs(out_dir):
             return keep_existing_outputs_message(
-                f"failed to obtain dataset catalog from {URI_root}", out_dir
+                f"failed to obtain dataset catalog from {URI_ROOT}", out_dir
             )
-        print(f"NUTS refresh failed: could not obtain dataset catalog from {URI_root}")
+        print(f"Location refresh failed: could not obtain dataset catalog from {URI_ROOT}")
         return 1
+
+    groups = group_dataset_uris(uris)
+    if groups.other:
+        print(f"Warning: found {len(groups.other)} unclassified dataset URIs")
+        for uri in groups.other[:10]:
+            print(f"  - {uri}")
+        if len(groups.other) > 10:
+            print("  ...")
 
     staging_dir = prepare_staging_dir(out_dir)
 
     try:
-        print("Opening region files...")
-        (
-            region_files,
-            region_writers,
-            unknown_file,
-            unknown_writer,
-            unknown_path,
-            pending_file,
-            pending_writer,
-            pending_path,
-        ) = open_region_writers(staging_dir)
-
-        seen_unknown_kraje: set[str] = set()
-
-        okres_id_to_region: dict[str, tuple[str, str]] = {}
-        okres_name_to_region: dict[str, tuple[str, str]] = {}
-        obec_id_to_region: dict[str, tuple[str, str]] = {}
-        obec_name_to_region: dict[str, tuple[str, str]] = {}
-
-        rows_written = 0
-
+        outputs = OutputManager(staging_dir)
+        region_by_nuts3: dict[str, RegionInfo] = {}
+        region_by_lau1: dict[str, RegionInfo] = {}
+        region_by_lau2: dict[str, RegionInfo] = {}
         try:
-            s = requests.Session()
-
-            for uri in tqdm(uris, desc="Fetching datasets", unit="dataset"):
-                r = fetch_json_with_retry(
-                    uri,
-                    session=s,
-                    tries=6,
-                    timeout=30.0,
-                    backoff=1.7,
-                )
-                if r is None:
-                    continue
-
-                current = r.get("features", [])
-                if not current:
-                    print(f"Warning: features in {uri} is empty/does not exist!")
-                    continue
-
-                for feature in current:
-                    if not isinstance(feature, dict):
-                        continue
-
-                    row = feature_to_row(feature)
-
-                    learn_region_maps(
-                        row,
-                        okres_id_to_region,
-                        okres_name_to_region,
-                        obec_id_to_region,
-                        obec_name_to_region,
-                    )
-
-                    filled = try_fill_missing_kraj(
-                        row,
-                        okres_id_to_region,
-                        okres_name_to_region,
-                        obec_id_to_region,
-                        obec_name_to_region,
-                    )
-
-                    if filled:
-                        learn_region_maps(
-                            row,
-                            okres_id_to_region,
-                            okres_name_to_region,
-                            obec_id_to_region,
-                            obec_name_to_region,
-                        )
-
-                    kraj = row[1].strip()
-
-                    if kraj in region_writers:
-                        region_writers[kraj].writerow(row)
-                        rows_written += 1
-                    else:
-                        pending_writer.writerow(row)
-
-                del r
-                del current
-
-            resolve_pending_rows(
-                pending_path,
-                unknown_writer,
-                region_writers,
-                seen_unknown_kraje,
-                okres_id_to_region,
-                okres_name_to_region,
-                obec_id_to_region,
-                obec_name_to_region,
+            session = requests.Session()
+            process_nuts3(session, groups.nuts3, outputs, region_by_nuts3)
+            process_lau1(session, groups.lau1, outputs, region_by_lau1, region_by_nuts3)
+            process_lau2(session, groups.lau2, outputs, region_by_lau1, region_by_lau2)
+            process_msa(session, groups.msa, outputs, region_by_lau1)
+            building_rows = process_mba(
+                session,
+                groups.mba,
+                outputs,
+                region_by_lau2,
             )
-
+            address_rows = process_maa(
+                session,
+                groups.maa,
+                outputs,
+            )
         finally:
-            for f in region_files.values():
-                f.close()
-            unknown_file.close()
-            pending_file.close()
+            outputs.close()
 
-        remove_if_header_only(unknown_path)
-        remove_if_header_only(pending_path)
-
-        generated_rows = count_generated_rows(staging_dir, unknown_path)
-        if generated_rows == 0 and rows_written == 0:
+        if address_rows == 0 and building_rows == 0:
             if has_existing_outputs(out_dir):
                 return keep_existing_outputs_message(
-                    "catalog was fetched but no dataset rows were produced", out_dir
+                    "catalog was fetched but no address/building rows were produced",
+                    out_dir,
                 )
-            print("NUTS refresh failed: catalog was fetched but no dataset rows were produced")
+            print(
+                "Location refresh failed: catalog was fetched but no address/building rows were produced"
+            )
             return 1
 
-        if seen_unknown_kraje:
-            print("Warning: Kraj values not in name_to_abb:")
-            for kraj in sorted(seen_unknown_kraje):
-                print(f"  - {kraj}")
-
-        print("Building kraje.csv...")
-        build_kraje_csv(staging_dir, unknown_path)
         install_outputs(staging_dir, out_dir)
+        print(
+            f"Wrote {address_rows} address rows, {building_rows} building rows, "
+            f"{len(region_by_nuts3)} kraje, {len(region_by_lau1)} okresy, {len(region_by_lau2)} obce"
+        )
         return 0
-
     finally:
         cleanup_staging_dir(staging_dir)
 
