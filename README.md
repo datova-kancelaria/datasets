@@ -3,7 +3,7 @@
 Public data-fetching pipeline for three modules:
 
 - `egov/` — MetaIS public report exports plus cloud service extraction from public CMDB endpoints
-- `nuts/` — location / address datasets from `rageo.minv.sk`
+- `location/` — location / address datasets from `rageo.minv.sk`
 - `ces-export/` — CES open-data fetcher that requires local CES credential files when enabled
 
 The repository is designed to run either:
@@ -38,7 +38,7 @@ So, for example, if `CES_EXPORT_OUT_DIR=""`, the CES module is skipped and the w
 
 There are **no GitHub Actions repository secrets** required by this repo.
 
-The `egov` and `nuts` modules use public endpoints.
+The `egov` and `location` modules use public endpoints.
 
 The `ces-export` module still requires local credential files when enabled:
 
@@ -56,7 +56,7 @@ These are provided from a machine-local directory via `CES_SECRETS_DIR` and pass
 - `runner-env.example.sh` — example machine-local environment file
 - `make_index.py` — builds directory index pages for the exported output tree
 - `egov/` — MetaIS public report and CMDB cloud-service pipeline
-- `nuts/` — location/address CSV fetching
+- `location/` — location/address CSV fetching
 - `ces-export/` — CES exporting package and wrapper script
 - `resources/` — static assets used by generated directory indexes
 
@@ -160,7 +160,7 @@ Under `EGOV_OUT_DIR`, the pipeline writes:
   - `CloudSluzba.json`
   - several raw and harmonized JSON files in `raw/`
 
-### NUTS / location
+### location
 
 Under `LOCATION_OUT_DIR`, the pipeline writes:
 
@@ -179,7 +179,7 @@ Under `CES_EXPORT_OUT_DIR`, `ces-export` writes dataset outputs according to `ce
 - `egov/fetch-reports.sh --out-dir <EGOV_OUT_DIR>`
 - `python egov/convert.py --data-dir <EGOV_OUT_DIR>`
 - `python egov/cloud_services.py --out-dir <EGOV_OUT_DIR>`
-- `python nuts/fetch-nuts.py --out-dir <LOCATION_OUT_DIR> --refresh-days <LOCATION_DATA_DAYS_REFRESH>`
+- `python location/fetch-location.py --out-dir <LOCATION_OUT_DIR> --refresh-days <LOCATION_DATA_DAYS_REFRESH>`
 - `ces-export/run.sh --out-dir <CES_EXPORT_OUT_DIR>`
 
 The eGov cloud-services helper has additional optional tuning flags (`--created-at-from`, `--created-at-to`, `--window-target-count`, `--page-size`, `--probe-page-size`), but the top-level orchestrator deliberately uses its defaults.
