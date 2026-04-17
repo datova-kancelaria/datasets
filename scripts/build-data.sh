@@ -44,12 +44,12 @@ fi
 
 if [[ -n "$LOCATION_OUT_DIR" ]]; then
   mkdir -p "$LOCATION_OUT_DIR"
-  echo "[nuts] running -> $LOCATION_OUT_DIR"
-  "$PYTHON_BIN" "$REPO_ROOT/nuts/fetch-nuts.py" \
+  echo "[location] running -> $LOCATION_OUT_DIR"
+  "$PYTHON_BIN" "$REPO_ROOT/location/fetch-location.py" \
     --out-dir "$LOCATION_OUT_DIR" \
     --refresh-days "$LOCATION_DATA_DAYS_REFRESH"
 else
-  echo "[nuts] skipped (output dir disabled)"
+  echo "[location] skipped (output dir disabled)"
 fi
 
 if [[ -n "$CES_EXPORT_OUT_DIR" ]]; then
