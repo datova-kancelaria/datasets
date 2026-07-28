@@ -3,7 +3,16 @@ name: Fetch datasets
 on:
   schedule:
     - cron: "0 2 * * 0"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: What should be rebuilt?
+        required: true
+        default: full
+        type: choice
+        options:
+          - full
+          - lkod-only
 
 concurrency:
   group: datasets-pages
@@ -91,16 +100,47 @@ jobs:
           echo "data_root=$DATA_ROOT" >> "$GITHUB_OUTPUT"
 
       - name: Build datasets
+        if: github.event_name != 'workflow_dispatch' || inputs.mode == 'full'
         shell: bash
         run: |
           set -euo pipefail
           ./scripts/build-data.sh
+
+      - name: Generate LKOD metadata only
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'lkod-only'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          : "${CES_EXPORT_OUT_DIR:?CES_EXPORT_OUT_DIR must be configured}"
+
+          cd "$GITHUB_WORKSPACE/ces-export"
+
+          "$PYTHON_BIN" -m lcod_catalogue.main \
+            --config "$CES_CONFIG" \
+            --metadata-config "$GITHUB_WORKSPACE/ces-export/config/lcod.json" \
+            --out-dir "$CES_EXPORT_OUT_DIR"
 
       - name: Generate directory index pages
         shell: bash
         run: |
           set -euo pipefail
           "$PYTHON_BIN" make_index.py "${{ steps.runner_env.outputs.data_root }}"
+
+      - name: Verify LKOD catalogue
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          catalogue="$CES_EXPORT_OUT_DIR/katalog.ttl"
+
+          if [[ ! -s "$catalogue" ]]; then
+            echo "LKOD catalogue is missing or empty: $catalogue" >&2
+            exit 1
+          fi
+
+          echo "LKOD catalogue found:"
+          ls -lh "$catalogue"
 
       - name: Upload data artifact
         uses: actions/upload-artifact@v4
