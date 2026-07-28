@@ -48,6 +48,50 @@ def visible_children(dir_path: Path, ignore_patterns: list[str]) -> list[Path]:
         if p.name not in SKIP_NAMES and not is_ignored(p, ignore_patterns)
     ]
 
+
+def indexable_directories(
+    root: Path,
+    ignore_patterns: list[str],
+) -> list[Path]:
+    """Return directories to index without descending into ignored trees."""
+
+    directories: list[Path] = []
+    pending = [root]
+
+    while pending:
+        current = pending.pop()
+        directories.append(current)
+
+        children = sorted(
+            (
+                path
+                for path in current.iterdir()
+                if path.is_dir()
+                and path.name != RESOURCES_DIRNAME
+                and not is_ignored(path, ignore_patterns)
+            ),
+            key=lambda path: str(path),
+            reverse=True,
+        )
+        pending.extend(children)
+
+    return directories
+
+
+def remove_stale_indexes(root: Path, indexed_directories: list[Path]) -> int:
+    """Remove generated indexes from directories that are now excluded."""
+
+    indexed = set(indexed_directories)
+    removed = 0
+
+    for index_path in root.rglob("index.html"):
+        if index_path.parent in indexed:
+            continue
+        index_path.unlink()
+        removed += 1
+
+    return removed
+
 def display_name_for_file(path: Path) -> str:
     return path.stem if path.suffix else path.name
 
@@ -340,15 +384,8 @@ def main() -> int:
     dir_size_cache: dict[Path, int] = {}
     dir_mtime_cache: dict[Path, int] = {}
 
-    dirs = [root] + sorted(
-        (
-            p for p in root.rglob("*")
-            if p.is_dir()
-            and p.name != RESOURCES_DIRNAME
-            and not is_ignored(p, ignore_patterns)
-        ),
-        key=lambda p: str(p),
-    )
+    dirs = indexable_directories(root, ignore_patterns)
+    removed_indexes = remove_stale_indexes(root, dirs)
 
     for d in dirs:
         write_index(
@@ -363,7 +400,10 @@ def main() -> int:
             ignore_patterns,
         )
 
-    print(f"Generated index.html in {len(dirs)} directories under {root}")
+    message = f"Generated index.html in {len(dirs)} directories under {root}"
+    if removed_indexes:
+        message += f"; removed {removed_indexes} stale index file(s)"
+    print(message)
     return 0
 
 

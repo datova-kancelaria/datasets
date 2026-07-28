@@ -1,1 +1,4 @@
 .hierarchy_node_code.txt
+.*
+lkod
+katalog.ttl
