@@ -177,3 +177,27 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+  healthcheck:
+    needs: [build-data, deploy]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Report publication result
+        env:
+          HC_URL: ${{ secrets.HEALTHCHECKS_PING_URL }}
+          BUILD_RESULT: ${{ needs.build-data.result }}
+          DEPLOY_RESULT: ${{ needs.deploy.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "$BUILD_RESULT" == "success" &&
+                "$DEPLOY_RESULT" == "success" ]]; then
+            curl -fsS -m 10 --retry 5 \
+              -o /dev/null "$HC_URL"
+          else
+            curl -fsS -m 10 --retry 5 \
+              -o /dev/null "${HC_URL}/fail"
+          fi
